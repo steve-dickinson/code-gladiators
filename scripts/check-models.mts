@@ -5,7 +5,10 @@ import { gateway, generateText } from "ai";
 import { GLADIATORS, JUDGE_MODEL } from "../src/lib/gladiators.ts";
 
 const models = [...new Set([...GLADIATORS.map((g) => g.model), JUDGE_MODEL])];
-const catalog = await gateway.getAvailableModels();
+const catalog = await gateway.getAvailableModels().catch((err: Error) => {
+  console.error(`Could not reach AI Gateway: ${err.message}\nRun \`vercel env pull\` to refresh your token, then try again.`);
+  process.exit(1);
+});
 const credits = await gateway.getCredits().catch(() => null);
 
 if (credits) console.log(`Credit balance: $${credits.balance} (used so far: $${credits.totalUsed})\n`);
