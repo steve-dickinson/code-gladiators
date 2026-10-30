@@ -1,36 +1,28 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Code Gladiators
 
-## Getting Started
+One challenge. Four AI models. Each writes a game from scratch, live, and runs it in its own locked-down Vercel Sandbox. Then an AI judge picks the winner, and the whole fight is saved as a free-to-watch replay.
 
-First, run the development server:
+Built on Vercel: AI SDK 7, AI Gateway, Sandbox, Blob, BotID and Fluid compute.
+
+## Run it
 
 ```bash
+npm install
+vercel link            # connect to your Vercel project
+vercel env pull        # downloads VERCEL_OIDC_TOKEN (+ Blob token once connected)
+echo "ARENA_KEY=$(openssl rand -hex 16)" >> .env.local
+npm run check-models   # which gladiators can your account call, and what do they cost?
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Where things live
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| File | What it does |
+| --- | --- |
+| `src/lib/gladiators.ts` | The models, the judge, and the cost limits. Edit this first. |
+| `src/app/api/battle/route.ts` | Streams four models in parallel, deploys to Sandbox, judges, records the replay. |
+| `src/lib/arena.ts` | One Sandbox microVM per battle, internet switched off, serving each entry. |
+| `src/lib/judge.ts` | Structured scoring with `Output.object` and an AI Gateway fallback model. |
+| `src/lib/replays.ts` | Saves and loads replays in Vercel Blob. |
+| `src/lib/battle-state.ts` | One reducer for both live battles and replays. |
+| `src/components/` | The arena UI, the live controls and the replay player. |
