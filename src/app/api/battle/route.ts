@@ -4,7 +4,8 @@ import { openArena, type Arena } from "@/lib/arena";
 import { GATEWAY_TAGS, GLADIATORS, LIMITS } from "@/lib/gladiators";
 import { judgeBattle } from "@/lib/judge";
 import { extractHtml, GLADIATOR_SYSTEM, gladiatorPrompt } from "@/lib/prompt";
-import { saveReplay } from "@/lib/replays";
+import { revalidateTag } from "next/cache";
+import { REPLAYS_TAG, saveReplay } from "@/lib/replays";
 import type { BattleData, BattleMessage, RecordedEvent } from "@/lib/types";
 
 // Fluid compute keeps this function alive while four models stream at once.
@@ -118,6 +119,7 @@ export async function POST(req: Request) {
       try {
         const winner = (events.findLast((e) => e.type === "verdict")?.data as BattleData["verdict"] | undefined)?.winner;
         await saveReplay({ id: battleId, createdAt: new Date(startedAt).toISOString(), challenge, winner, events });
+        revalidateTag(REPLAYS_TAG, "max"); // the gallery picks up the new battle on its next visit
         emit("replay", { id: battleId });
       } catch (err) {
         console.error("Could not save replay", err);

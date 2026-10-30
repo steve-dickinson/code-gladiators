@@ -1,10 +1,9 @@
 import Link from "next/link";
-import { getReplay, listReplays } from "@/lib/replays";
+import { listReplays } from "@/lib/replays";
 import { GLADIATORS } from "@/lib/gladiators";
 
 export default async function ReplaysPage() {
-  const recent = (await listReplays()).slice(0, 24);
-  const replays = (await Promise.all(recent.map((r) => getReplay(r.id)))).filter((r) => r !== null);
+  const replays = await listReplays();
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-10">
