@@ -1,3 +1,5 @@
+import type { TestReport } from "./types";
+
 export const GLADIATOR_SYSTEM = `You are a gladiator in Code Gladiators, a live arena where AI models race to build the same thing.
 
 Build exactly what the challenge asks as ONE self-contained HTML file.
@@ -11,6 +13,18 @@ Rules:
 
 export function gladiatorPrompt(challenge: string) {
   return `Challenge: ${challenge}`;
+}
+
+// After a failed playtest, the gladiator sees exactly what the browser saw.
+export function fixPrompt(report: TestReport) {
+  const problems = [
+    ...report.errors.map((e) => `- ${e}`),
+    ...(report.blank ? ["- The screen stayed empty: nothing was drawn and no text appeared."] : []),
+  ].join("\n");
+  return `A headless browser just played your file. It loaded the page, clicked, pressed Space, Enter and the arrow keys, typed, and moved the mouse. It found these problems:
+${problems}
+
+Fix them. Keep everything that already works. Output the complete corrected HTML file, starting with <!DOCTYPE html>, and nothing else.`;
 }
 
 // Models sometimes wrap their answer in ``` fences or add chatter. Pull out the HTML.

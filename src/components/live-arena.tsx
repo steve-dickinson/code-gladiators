@@ -1,12 +1,10 @@
 "use client";
 
-import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
 import Link from "next/link";
-import { useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ArenaView } from "./arena-view";
 import { battleReducer, emptyBattle } from "@/lib/battle-state";
-import type { BattleMessage } from "@/lib/types";
+import type { BattleEvent } from "@/lib/types";
 
 const IDEAS = [
   "Build Snake, but the snake is afraid of the dark",
@@ -19,23 +17,88 @@ export function LiveArena() {
   const [state, dispatch] = useReducer(battleReducer, emptyBattle);
   const [challenge, setChallenge] = useState("");
   const [key, setKey] = useState("");
+  const [fighting, setFighting] = useState(false);
+  const [error, setError] = useState<string>();
+  const watching = useRef<AbortController>(null);
 
-  const { sendMessage, status, error } = useChat<BattleMessage>({
-    transport: new DefaultChatTransport({ api: "/api/battle" }),
-    // Every streamed battle event lands here and goes through the shared reducer.
-    onData: (part) => {
-      const type = part.type.slice("data-".length);
-      dispatch({ type, data: part.data } as Parameters<typeof dispatch>[0]);
-    },
-  });
+  // Follow a battle's event stream. A battle can run longer than one request is
+  // allowed to, so when the stream ends early we reconnect from the number of
+  // events already seen, until the "done" event arrives.
+  const watch = useCallback(async (runId: string) => {
+    watching.current?.abort();
+    const controller = new AbortController();
+    watching.current = controller;
+    dispatch({ type: "reset" });
+    setFighting(true);
+    setError(undefined);
 
-  const fighting = status === "submitted" || status === "streaming";
+    let seen = 0;
+    let emptyTries = 0;
+    try {
+      while (!controller.signal.aborted) {
+        const res = await fetch(`/api/battle/${runId}/stream?from=${seen}`, { signal: controller.signal });
+        if (!res.ok || !res.body) throw new Error(`Couldn't watch the battle (${res.status})`);
+        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buffer = "";
+        let got = 0;
+        let finished = false;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += value;
+          let newline;
+          while ((newline = buffer.indexOf("\n")) >= 0) {
+            const line = buffer.slice(0, newline);
+            buffer = buffer.slice(newline + 1);
+            if (!line.trim()) continue;
+            const event = JSON.parse(line) as BattleEvent;
+            seen++;
+            got++;
+            dispatch(event);
+            if (event.type === "done") finished = true;
+          }
+        }
+        if (finished) break;
+        emptyTries = got ? 0 : emptyTries + 1;
+        if (emptyTries >= 3) throw new Error("The battle stream went quiet. Refresh to try again.");
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    } catch (err) {
+      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (watching.current === controller) setFighting(false);
+    }
+  }, []);
 
-  function start(e: React.FormEvent) {
+  // Refreshing the page (or opening the link on your phone) picks the battle up again.
+  useEffect(() => {
+    const runId = new URLSearchParams(window.location.search).get("run");
+    const resume = runId ? setTimeout(() => watch(runId)) : undefined; // start watching after this render
+    return () => {
+      clearTimeout(resume);
+      watching.current?.abort();
+    };
+  }, [watch]);
+
+  async function start(e: React.FormEvent) {
     e.preventDefault();
     if (!challenge.trim() || fighting) return;
-    dispatch({ type: "reset" });
-    sendMessage({ text: challenge }, { headers: { "x-arena-key": key } });
+    setFighting(true);
+    setError(undefined);
+    try {
+      const res = await fetch("/api/battle", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-arena-key": key },
+        body: JSON.stringify({ challenge }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { runId?: string; error?: string };
+      if (!res.ok || !body.runId) throw new Error(body.error ?? `The arena said no (${res.status})`);
+      window.history.replaceState(null, "", `?run=${body.runId}`);
+      watch(body.runId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setFighting(false);
+    }
   }
 
   return (
@@ -79,7 +142,7 @@ export function LiveArena() {
             No key? Watch the replays
           </Link>
         </div>
-        {error && <p className="font-mono text-sm text-red-400">{error.message}</p>}
+        {error && <p className="font-mono text-sm text-red-400">{error}</p>}
       </form>
 
       <ArenaView state={state} mode="live" />

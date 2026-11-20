@@ -1,13 +1,17 @@
 import { generateText, Output } from "ai";
 import { z } from "zod";
 import { GATEWAY_TAGS, JUDGE_FALLBACKS, JUDGE_MODEL, LIMITS, QUICK_JUDGE_MODEL } from "./gladiators";
-import type { Score } from "./types";
+import type { Score, TestReport } from "./types";
+
+export type JudgeEntry = { id: string; name: string; html: string; rounds?: number; test?: TestReport };
 
 const JUDGE_CHARS = 40_000;
 
 const JUDGE_SYSTEM =
   "You are the stern but entertaining judge of Code Gladiators. Score each single-file HTML entry from its source code. " +
   "Each entry's header says whether its file is complete: trust it. A long entry may be cut short for you, but that does not make it unfinished. " +
+  "Each header also reports what a headless browser saw when it played the final version: errors it found are real bugs, " +
+  "and needing fixes is fine if the final version works. " +
   "Only files marked UNFINISHED, or with clear bugs, score low on polish and fidelity. Be specific in roasts.";
 
 // Built per battle so the judge must score every gladiator, by its exact id, once.
@@ -30,9 +34,19 @@ const verdictSchemaFor = (ids: [string, ...string[]]) =>
     headline: z.string().describe("a sports-commentator headline for the battle, max 12 words"),
   });
 
+// e.g. " · browser test: passed after 1 fix" or " · browser test: failed: TypeError …"
+function playtest(e: JudgeEntry) {
+  if (!e.test) return " · not browser-tested";
+  const fixes = (e.rounds ?? 1) - 1;
+  const after = fixes ? ` after ${fixes} fix${fixes > 1 ? "es" : ""}` : "";
+  if (e.test.passed) return ` · browser test: passed${after || " first time"}`;
+  const problems = [...e.test.errors, ...(e.test.blank ? ["the screen stayed empty"] : [])];
+  return ` · browser test: ${fixes ? `still failing${after}` : "failed"}: ${problems.join(" | ").slice(0, 400)}`;
+}
+
 export async function judgeBattle(
   challenge: string,
-  entries: { id: string; name: string; html: string }[],
+  entries: JudgeEntry[],
 ) {
   // Show the judge up to 40,000 characters of each entry (about 10,000 tokens), and
   // tell it in code whether the file is finished. In the first battle the judge saw
@@ -44,7 +58,7 @@ export async function judgeBattle(
       const complete = /<\/html>\s*$/i.test(e.html);
       const header = `### Gladiator "${e.id}" (${e.name}) · ${e.html.length.toLocaleString("en-GB")} characters · ${
         complete ? "the file is complete" : "the file is UNFINISHED: it stops before </html>"
-      }`;
+      }${playtest(e)}`;
       const shown =
         e.html.length > JUDGE_CHARS
           ? `${e.html.slice(0, JUDGE_CHARS)}\n… (${(e.html.length - JUDGE_CHARS).toLocaleString("en-GB")} more characters not shown)`

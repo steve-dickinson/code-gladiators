@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import { withBotId } from "botid/next/config";
+import { withWorkflow } from "workflow/next";
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
@@ -15,4 +16,5 @@ const nextConfig: NextConfig = {
 };
 
 // withBotId adds the rewrites BotID needs to run its invisible challenge.
-export default withBotId(nextConfig);
+// withWorkflow compiles "use workflow" and "use step" functions into durable workflows.
+export default withWorkflow(withBotId(nextConfig));

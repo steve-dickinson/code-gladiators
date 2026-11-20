@@ -41,12 +41,14 @@ export const JUDGE_FALLBACKS = ["zai/glm-4.7"];
 // If the main judge is too slow, a smaller, faster model from the same lab steps in.
 export const QUICK_JUDGE_MODEL = "mistral/mistral-small";
 
-// Cost and time guard rails. On Vercel's free plan the whole battle must finish
-// within 300 seconds, so these add up to 270 at worst: 150 + 80 + 40.
+// Cost and time guard rails. Each battle is a Vercel Workflow, so the battle as a
+// whole has no time limit, but every step (one write, one test, one judging) must
+// finish inside a single function's 300 seconds on the free plan.
 export const LIMITS = {
-  maxOutputTokens: 8000, // per gladiator per battle: caps the worst-case spend
+  maxRounds: 3, // write, then up to two rounds of test-and-fix
+  maxOutputTokens: 8000, // per gladiator per round: caps the worst-case spend
   maxChallengeLength: 280, // a tweet-sized challenge keeps prompts cheap
-  battleTimeoutMs: 150_000, // abandon a gladiator that takes longer than this
+  writeTimeoutMs: 150_000, // abandon one round of writing after this
   judgeTimeoutMs: 80_000, // give up on the main judge after this
   quickJudgeTimeoutMs: 40_000, // and on the quick judge after this
 };

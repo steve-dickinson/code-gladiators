@@ -1,11 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { finalHtml, type BattleState, type GladiatorView } from "@/lib/battle-state";
+import type { BattleState, GladiatorView } from "@/lib/battle-state";
+import { extractHtml } from "@/lib/prompt";
 
 const STATUS_LABEL: Record<GladiatorView["status"], string> = {
   waiting: "entering the arena",
   writing: "writing code",
+  testing: "browser is playing it",
+  fixing: "fixing its bugs",
   deploying: "deploying to sandbox",
   live: "live",
   failed: "knocked out",
@@ -39,7 +42,7 @@ export function ArenaView({ state, mode }: { state: BattleState; mode: "live" | 
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-amber-400">
             The judge is deliberating<span className="animate-pulse">…</span>
           </p>
-          <p className="mt-1 text-stone-400">Reading every line of every entry. This can take a minute or two.</p>
+          <p className="mt-1 text-stone-400">Reading every line of every entry, and what the browser saw. This can take a minute or two.</p>
         </div>
       )}
 
@@ -74,10 +77,16 @@ export function ArenaView({ state, mode }: { state: BattleState; mode: "live" | 
 
 function GladiatorCard({ g, mode, score, winner }: { g: GladiatorView; mode: "live" | "replay"; score?: number; winner: boolean }) {
   const [tab, setTab] = useState<"auto" | "code" | "preview">("auto");
+  const [picked, setPicked] = useState<number>(); // a version the viewer chose to look at
   const done = g.status === "live";
+  const version = done && picked ? picked : g.round;
+  const code = g.versions[version - 1] ?? "";
   const showPreview = tab === "preview" || (tab === "auto" && done);
   // In a replay the sandbox is long gone, so the preview renders from the recorded code.
-  const useSandbox = mode === "live" && g.previewUrl;
+  // The sandbox only serves the final version.
+  const useSandbox = mode === "live" && g.previewUrl && version === g.round;
+  const busy = g.status === "writing" || g.status === "fixing";
+  const lastTest = g.tests.at(-1);
 
   return (
     <article
@@ -96,34 +105,82 @@ function GladiatorCard({ g, mode, score, winner }: { g: GladiatorView; mode: "li
       </header>
 
       <div className="relative h-80 bg-black">
-        {showPreview && g.code ? (
+        {showPreview && code ? (
           <iframe
-            title={`${g.name} entry`}
+            key={version}
+            title={`${g.name} entry, version ${version}`}
             sandbox="allow-scripts"
             className="h-full w-full bg-white"
-            {...(useSandbox ? { src: g.previewUrl } : { srcDoc: finalHtml(g) })}
+            {...(useSandbox ? { src: g.previewUrl } : { srcDoc: extractHtml(code) })}
           />
-        ) : g.status === "failed" && !g.code ? (
+        ) : g.status === "failed" && !code ? (
           <div className="grid h-full place-items-center font-mono text-sm text-stone-600">no entry</div>
         ) : (
           <div className="flex h-full flex-col-reverse overflow-hidden p-3">
             <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-4 text-stone-400">
-              {g.code.slice(-3500) || " "}
-              {g.status === "writing" && <span className="animate-pulse text-stone-100">▋</span>}
+              {code.slice(-3500) || " "}
+              {busy && <span className="animate-pulse text-stone-100">▋</span>}
             </pre>
+          </div>
+        )}
+        {g.status === "testing" && (
+          <div className="absolute inset-x-0 bottom-0 bg-stone-950/90 px-3 py-2 font-mono text-xs text-sky-300">
+            <span className="animate-pulse">●</span> A headless browser is clicking, pressing keys and watching for errors…
+          </div>
+        )}
+        {g.status === "fixing" && lastTest && !lastTest.passed && (
+          <div className="absolute inset-x-0 top-0 max-h-28 overflow-hidden bg-red-950/90 px-3 py-2 font-mono text-[11px] leading-4 text-red-200">
+            <p className="mb-1 uppercase tracking-wider text-red-400">The browser found</p>
+            {lastTest.errors.slice(0, 3).map((e) => (
+              <p key={e} className="truncate">✗ {e}</p>
+            ))}
+            {lastTest.blank && <p>✗ the screen stayed empty</p>}
           </div>
         )}
       </div>
 
+      {g.tests.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stone-800 px-4 py-2 font-mono text-xs">
+          {g.tests.map((t) => (
+            <span
+              key={t.round}
+              title={t.passed ? "No errors, and something on screen" : [...t.errors, ...(t.blank ? ["the screen stayed empty"] : [])].join("\n")}
+              className={t.passed ? "text-emerald-400" : "text-red-400"}
+            >
+              {t.passed ? "✓" : "✗"} test {t.round}
+              {!t.passed && t.errors.length > 0 && ` · ${t.errors.length} error${t.errors.length > 1 ? "s" : ""}`}
+              {!t.passed && t.blank && " · blank"}
+            </span>
+          ))}
+          <span className="flex-1" />
+          {done && g.versions.length > 1 && (
+            <div className="flex gap-1">
+              {g.versions.map((v, i) =>
+                v ? (
+                  <button
+                    key={i}
+                    onClick={() => setPicked(i + 1)}
+                    className={`rounded px-2 py-0.5 ${version === i + 1 ? "bg-stone-800 text-stone-100" : "text-stone-400 hover:text-stone-200"}`}
+                  >
+                    v{i + 1}
+                  </button>
+                ) : null,
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <footer className="flex items-center gap-3 border-t border-stone-800 px-4 py-2 font-mono text-xs text-stone-400">
         <span className={g.status === "failed" ? "text-red-400" : done ? "text-emerald-400" : "text-amber-300"}>
           {STATUS_LABEL[g.status]}
+          {g.round > 1 && !done && ` (round ${g.round})`}
         </span>
         {g.ms !== undefined && <span>{(g.ms / 1000).toFixed(1)}s</span>}
         {g.outputTokens !== undefined && <span>{g.outputTokens.toLocaleString()} tokens</span>}
         {g.costUsd !== undefined && <span>${g.costUsd.toFixed(4)}</span>}
         <span className="flex-1" />
-        {g.code && (
+        {code && (
           <div className="flex gap-1">
             {(["code", "preview"] as const).map((t) => (
               <button
