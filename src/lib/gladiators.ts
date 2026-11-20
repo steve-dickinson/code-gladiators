@@ -1,3 +1,7 @@
+import type { streamText } from "ai";
+
+type ProviderOptions = NonNullable<Parameters<typeof streamText>[0]["providerOptions"]>;
+
 // Who fights, who judges, and how much they're allowed to spend.
 // Swap any model for another AI Gateway slug: run `npm run check-models`
 // to see which ones your account can call and what they cost.
@@ -7,25 +11,44 @@ export type Gladiator = {
   name: string; // arena name shown in the UI
   model: string; // AI Gateway model slug
   colour: string; // accent colour for the card
+  providerOptions?: ProviderOptions; // extra settings passed to this model's provider
 };
 
+// Four labs, all callable on the AI Gateway free tier (checked with `npm run check-models -- --scan`).
 export const GLADIATORS: Gladiator[] = [
-  { id: "haiku", name: "Claude Haiku 5.5", model: "anthropic/claude-haiku-5.5", colour: "#e8885a" },
-  { id: "gemini", name: "Gemini 3.5 Flash", model: "google/gemini-3.5-flash", colour: "#5b8def" },
-  { id: "deepseek", name: "DeepSeek V4.1 Flash", model: "deepseek/deepseek-v4.1-flash", colour: "#9b7bf0" },
+  { id: "gptoss", name: "GPT-OSS 120B", model: "openai/gpt-oss-120b", colour: "#e8885a" },
+  {
+    id: "gemini",
+    name: "Gemini 2.5 Flash",
+    model: "google/gemini-2.5-flash",
+    colour: "#5b8def",
+    // Gemini thinks before it writes, and thinking counts against maxOutputTokens.
+    // In the first battle it spent its whole budget thinking and wrote 917 characters.
+    // A budget of 0 switches thinking off, so every token goes on the game.
+    providerOptions: {
+      google: { thinkingConfig: { thinkingBudget: 0 } },
+      vertex: { thinkingConfig: { thinkingBudget: 0 } },
+    },
+  },
+  { id: "deepseek", name: "DeepSeek V3.1", model: "deepseek/deepseek-v3.1", colour: "#9b7bf0" },
   { id: "qwen", name: "Qwen3 Coder Next", model: "alibaba/qwen3-coder-next", colour: "#3fbf8f" },
 ];
 
-// The judge watches every fight. If its model is down, AI Gateway
-// falls back to the next one in JUDGE_FALLBACKS automatically.
-export const JUDGE_MODEL = "google/gemini-3.5-flash";
-export const JUDGE_FALLBACKS = ["anthropic/claude-haiku-5.5"];
+// The judge comes from a lab that isn't in the fight, so it has no favourite.
+// If its model is down, AI Gateway falls back to the next one in JUDGE_FALLBACKS automatically.
+export const JUDGE_MODEL = "mistral/mistral-large-3";
+export const JUDGE_FALLBACKS = ["zai/glm-4.7"];
+// If the main judge is too slow, a smaller, faster model from the same lab steps in.
+export const QUICK_JUDGE_MODEL = "mistral/mistral-small";
 
-// Cost guard rails.
+// Cost and time guard rails. On Vercel's free plan the whole battle must finish
+// within 300 seconds, so these add up to 270 at worst: 150 + 80 + 40.
 export const LIMITS = {
   maxOutputTokens: 8000, // per gladiator per battle: caps the worst-case spend
   maxChallengeLength: 280, // a tweet-sized challenge keeps prompts cheap
   battleTimeoutMs: 150_000, // abandon a gladiator that takes longer than this
+  judgeTimeoutMs: 80_000, // give up on the main judge after this
+  quickJudgeTimeoutMs: 40_000, // and on the quick judge after this
 };
 
 // Tag every request so AI Gateway's dashboard can report spend for this app alone.

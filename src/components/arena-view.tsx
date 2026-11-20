@@ -34,6 +34,15 @@ export function ArenaView({ state, mode }: { state: BattleState; mode: "live" | 
         ))}
       </div>
 
+      {!state.verdict && state.gladiators.length > 0 && state.gladiators.every((g) => g.status === "live" || g.status === "failed") && (
+        <div className="rounded-xl border border-stone-700 bg-stone-900/60 p-5">
+          <p className="font-mono text-xs uppercase tracking-[0.2em] text-amber-400">
+            The judge is deliberating<span className="animate-pulse">…</span>
+          </p>
+          <p className="mt-1 text-stone-400">Reading every line of every entry. This can take a minute or two.</p>
+        </div>
+      )}
+
       {state.verdict && (
         <div className="rounded-xl border border-stone-700 bg-stone-900/60 p-5">
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-amber-400">The judge has spoken</p>

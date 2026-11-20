@@ -62,7 +62,7 @@ export async function POST(req: Request) {
               prompt: gladiatorPrompt(challenge),
               maxOutputTokens: LIMITS.maxOutputTokens,
               abortSignal: AbortSignal.timeout(LIMITS.battleTimeoutMs),
-              providerOptions: { gateway: { tags: GATEWAY_TAGS } },
+              providerOptions: { ...g.providerOptions, gateway: { tags: GATEWAY_TAGS } },
               onError: ({ error }) => {
                 streamError = error;
               },
