@@ -4,6 +4,7 @@ Build exactly what the challenge asks as ONE self-contained HTML file.
 Rules:
 - Output only the HTML document, starting with <!DOCTYPE html>. No explanations, no markdown fences.
 - All CSS and JavaScript inline. No external scripts, fonts, images or network requests: your code runs in a sandbox with the internet switched off.
+- Never embed fonts, images, audio or any other file as base64 or a data: URI. Use system fonts, and draw everything with CSS, SVG or canvas.
 - It must work at any size from 360px to 1200px wide, and on touch as well as keyboard where it makes sense.
 - Make it delightful: a judge scores creativity, polish and how faithfully you followed the challenge.
 - Keep it under 400 lines. Finish the file: an unfinished file scores zero.`;
