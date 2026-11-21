@@ -1,3 +1,4 @@
+import { BENCHMARK, BENCHMARK_CATEGORIES, benchmarkOf, type BenchmarkCategory } from "./benchmark";
 import type { BattleData, Replay } from "./types";
 
 // The leaderboard: every saved battle, boiled down to numbers per model. It reads the
@@ -60,8 +61,9 @@ type Tally = Omit<ModelStats, "avgScore" | "avgParts" | "avgPlace" | "medianSeco
   costs: number[];
 };
 
-// only: "tested" counts just the battles where the browser tested the entries.
-export function computeLeaderboard(replays: Replay[], only: "all" | "tested" = "all"): Leaderboard {
+// only: "tested" counts just the battles where the browser tested the entries;
+// "benchmark" just the benchmark challenges (not rematches); a category, just its challenges.
+export function computeLeaderboard(replays: Replay[], only: "all" | "tested" | "benchmark" | BenchmarkCategory = "all"): Leaderboard {
   const tallies = new Map<string, Tally>();
   const board: Leaderboard = { battles: 0, voided: 0, coachedLeftOut: 0, judged: 0, blind: 0, sawScreenshots: 0, models: [] };
   const dates: string[] = [];
@@ -72,6 +74,10 @@ export function computeLeaderboard(replays: Replay[], only: "all" | "tested" = "
     const statuses = replay.events.flatMap((e) => (e.type === "status" ? [e.data] : []));
     const tests = replay.events.flatMap((e) => (e.type === "test" ? [e.data] : []));
     if (only === "tested" && tests.length === 0) continue;
+    if (only !== "all" && only !== "tested") {
+      const b = benchmarkOf(replay.challenge);
+      if (!b || !countsForBenchmark(replay, battle) || (only !== "benchmark" && b.category !== only)) continue;
+    }
     if (!statuses.some((s) => s.status === "live")) {
       board.voided++;
       continue;
@@ -158,4 +164,29 @@ export function computeLeaderboard(replays: Replay[], only: "all" | "tested" = "
   board.from = dates[0];
   board.to = dates.at(-1);
   return board;
+}
+
+// A benchmark run must be played under the same rules as every other: not a rematch
+// (half of those had help), and judged blind. Older battles with the same challenge were
+// judged by a judge that could see model names, before the browser tests existed, so
+// they stay in the "all battles" table but don't count here.
+function countsForBenchmark(replay: Replay, battle: BattleData["battle"]) {
+  const verdict = replay.events.findLast((e) => e.type === "verdict")?.data as BattleData["verdict"] | undefined;
+  return !battle.rematch && Boolean(verdict?.blind);
+}
+
+// The benchmark at a glance: the overall table, each model's average score per kind of
+// challenge, and how many times each challenge has been run so far.
+export function computeBenchmark(replays: Replay[]) {
+  const overall = computeLeaderboard(replays, "benchmark");
+  const byCategory = BENCHMARK_CATEGORIES.map((category) => ({ category, board: computeLeaderboard(replays, category) }));
+  const runs = BENCHMARK.map((b) => ({
+    ...b,
+    runs: replays.filter((r) => {
+      const battle = r.events.find((e) => e.type === "battle")?.data as BattleData["battle"] | undefined;
+      const built = r.events.some((e) => e.type === "status" && e.data.status === "live");
+      return benchmarkOf(r.challenge)?.id === b.id && battle !== undefined && countsForBenchmark(r, battle) && built;
+    }).length,
+  }));
+  return { overall, byCategory, runs };
 }

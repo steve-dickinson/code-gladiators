@@ -1,6 +1,6 @@
 import { get, list, put } from "@vercel/blob";
 import { cacheLife, cacheTag } from "next/cache";
-import { computeLeaderboard } from "./leaderboard";
+import { computeBenchmark, computeLeaderboard } from "./leaderboard";
 import type { Replay } from "./types";
 
 // Replays live in Vercel Blob:
@@ -89,5 +89,5 @@ export async function getLeaderboard() {
   cacheLife("days");
   const summaries = await listReplays();
   const replays = (await Promise.all(summaries.map((r) => getReplay(r.id)))).filter((r): r is Replay => r !== null);
-  return { all: computeLeaderboard(replays), tested: computeLeaderboard(replays, "tested") };
+  return { all: computeLeaderboard(replays), tested: computeLeaderboard(replays, "tested"), benchmark: computeBenchmark(replays) };
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { BENCHMARK, BENCHMARK_CATEGORIES, benchmarkOf } from "@/lib/benchmark";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ArenaView } from "./arena-view";
 import { battleReducer, emptyBattle } from "@/lib/battle-state";
@@ -72,10 +73,15 @@ export function LiveArena() {
 
   // Refreshing the page (or opening the link on your phone) picks the battle up again.
   useEffect(() => {
-    const runId = new URLSearchParams(window.location.search).get("run");
+    const params = new URLSearchParams(window.location.search);
+    const runId = params.get("run");
     const resume = runId ? setTimeout(() => watch(runId)) : undefined; // start watching after this render
+    // A "Run" link from the leaderboard (/?challenge=calculator) fills in that benchmark challenge.
+    const picked = BENCHMARK.find((b) => b.id === params.get("challenge"));
+    const fill = picked && !runId ? setTimeout(() => setChallenge(picked.challenge)) : undefined;
     return () => {
       clearTimeout(resume);
+      clearTimeout(fill);
       watching.current?.abort();
     };
   }, [watch]);
@@ -108,7 +114,7 @@ export function LiveArena() {
           value={challenge}
           onChange={(e) => setChallenge(e.target.value)}
           maxLength={280}
-          rows={2}
+          rows={3}
           placeholder="Set the challenge…"
           className="w-full resize-none rounded-xl border border-stone-700 bg-stone-900 px-4 py-3 text-lg text-stone-100 placeholder:text-stone-600 focus:border-amber-500 focus:outline-none"
         />
@@ -123,6 +129,30 @@ export function LiveArena() {
               {idea}
             </button>
           ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <select
+            value={benchmarkOf(challenge)?.id ?? ""}
+            onChange={(e) => {
+              const picked = BENCHMARK.find((b) => b.id === e.target.value);
+              if (picked) setChallenge(picked.challenge);
+            }}
+            className="rounded-lg border border-stone-700 bg-stone-900 px-3 py-1.5 text-stone-300 focus:border-amber-500 focus:outline-none"
+          >
+            <option value="">Benchmark challenges…</option>
+            {BENCHMARK_CATEGORIES.map((category) => (
+              <optgroup key={category} label={category}>
+                {BENCHMARK.filter((b) => b.category === category).map((b) => (
+                  <option key={b.id} value={b.id}>{b.title}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          {benchmarkOf(challenge) ? (
+            <span className="font-mono text-xs text-amber-400">Counts towards the benchmark</span>
+          ) : (
+            challenge.trim() && <span className="font-mono text-xs text-stone-500">A free battle (not in the benchmark)</span>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <input

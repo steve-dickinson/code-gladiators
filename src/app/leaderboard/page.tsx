@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { BENCHMARK, BENCHMARK_CATEGORIES, BENCHMARK_RUNS } from "@/lib/benchmark";
 import type { Leaderboard, ModelStats } from "@/lib/leaderboard";
 import { getLeaderboard } from "@/lib/replays";
 
@@ -22,7 +23,11 @@ const outOf = (n: number, of: number) => (of ? `${n} of ${of}` : "–");
 const num = (n?: number) => (n === undefined ? "–" : n.toString());
 
 export default async function LeaderboardPage() {
-  const { all, tested } = await getLeaderboard();
+  const { all, tested, benchmark } = await getLeaderboard();
+  const target = BENCHMARK.length * BENCHMARK_RUNS;
+  const done = benchmark.runs.reduce((n, r) => n + Math.min(r.runs, BENCHMARK_RUNS), 0);
+  const categoryScore = (id: string, category: string) =>
+    benchmark.byCategory.find((c) => c.category === category)?.board.models.find((m) => m.id === id)?.avgScore;
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-10">
@@ -33,6 +38,56 @@ export default async function LeaderboardPage() {
         <Link href="/replays" className="text-amber-400 hover:underline">replays</Link>, so it updates after each battle and costs
         nothing to run.
       </p>
+
+      <Section
+        title="The benchmark"
+        subtitle={`${BENCHMARK.length} fixed challenges, each run ${BENCHMARK_RUNS} times, so every model faces the same tasks. ${done} of ${target} runs done. Only blind-judged battles with these exact challenges count, so every run is played under the same rules.`}
+      >
+        {benchmark.overall.battles > 0 ? (
+          <Table
+            head={["Model", "Wins", "Avg score", ...BENCHMARK_CATEGORIES, "Worked first time", "AI tester found bugs", "Typical cost"]}
+            rows={benchmark.overall.models.map((m) => [
+              <Name key="n" m={m} />,
+              outOf(m.wins, m.judged),
+              m.avgScore === undefined ? "–" : `${m.avgScore} / 30`,
+              ...BENCHMARK_CATEGORIES.map((c) => num(categoryScore(m.id, c))),
+              outOf(m.firstTime, m.tested),
+              m.aiTested ? outOf(m.aiBugs, m.aiTested) : "not yet",
+              money(m.medianCostUsd),
+            ])}
+          />
+        ) : (
+          <p className="px-4 py-5 text-sm text-stone-400">
+            No benchmark battles yet. Press Run on any challenge below: it opens the arena with that challenge filled in,
+            ready for your arena key.
+          </p>
+        )}
+      </Section>
+      <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {benchmark.runs.map((b) => (
+          <li key={b.id} className="rounded-xl border border-stone-800 bg-stone-900/40 p-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="font-medium text-stone-100">{b.title}</p>
+              <p className="font-mono text-[11px] uppercase tracking-wider text-stone-500">{b.category}</p>
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-stone-400">{b.challenge}</p>
+            <p className="mt-3 flex items-center gap-1.5 font-mono text-xs text-stone-400">
+              {Array.from({ length: BENCHMARK_RUNS }, (_, i) => (
+                <span key={i} className={`h-2 w-2 rounded-full ${i < b.runs ? "bg-amber-400" : "bg-stone-700"}`} />
+              ))}
+              <span className="ml-1">
+                {Math.min(b.runs, BENCHMARK_RUNS)} of {BENCHMARK_RUNS} runs{b.runs > BENCHMARK_RUNS ? ` (+${b.runs - BENCHMARK_RUNS} extra)` : ""}
+              </span>
+              <Link
+                href={`/?challenge=${b.id}`}
+                className="ml-auto rounded-md border border-amber-500/60 px-2.5 py-1 font-sans text-xs font-medium text-amber-300 hover:border-amber-400 hover:bg-amber-500/10"
+              >
+                Run →
+              </Link>
+            </p>
+          </li>
+        ))}
+      </ul>
 
       {all.battles === 0 ? (
         <p className="mt-10 text-stone-500">No battles yet. Start one from the arena.</p>
