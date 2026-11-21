@@ -25,7 +25,7 @@ export async function POST(req: Request) {
     const original = await getReplay(String(body.rematchOf));
     if (!original) return Response.json({ error: "That battle isn't in the replays." }, { status: 404 });
     rematch = planRematch(original, GLADIATORS.map((g) => g.id)) ?? undefined;
-    if (!rematch) return Response.json({ error: "That battle has no verdict to learn from." }, { status: 400 });
+    if (!rematch) return Response.json({ error: "That battle has no judged entries to learn from." }, { status: 400 });
     challenge = original.challenge;
   }
   if (!challenge) return Response.json({ error: "Give the gladiators a challenge." }, { status: 400 });

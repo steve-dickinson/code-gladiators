@@ -1,5 +1,6 @@
 import { get, list, put } from "@vercel/blob";
 import { cacheLife, cacheTag } from "next/cache";
+import { computeLeaderboard } from "./leaderboard";
 import type { Replay } from "./types";
 
 // Replays live in Vercel Blob:
@@ -78,4 +79,15 @@ export async function getReplay(id: string): Promise<Replay | null> {
   cacheLife("max"); // a replay never changes once it's saved
   if (!/^[\w-]+$/.test(id)) return null;
   return readJson<Replay>(`replays/${id}.json`);
+}
+
+// The leaderboard reads every saved battle. Each replay is cached for good once read,
+// and the result is refreshed straight after each battle, like the gallery.
+export async function getLeaderboard() {
+  "use cache";
+  cacheTag(REPLAYS_TAG);
+  cacheLife("days");
+  const summaries = await listReplays();
+  const replays = (await Promise.all(summaries.map((r) => getReplay(r.id)))).filter((r): r is Replay => r !== null);
+  return { all: computeLeaderboard(replays), tested: computeLeaderboard(replays, "tested") };
 }

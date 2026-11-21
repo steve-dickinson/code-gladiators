@@ -325,9 +325,11 @@ export async function playtestWith(
     // The scripted test only proves the page runs (and, for a game, reacts). If it got
     // that far, an AI tester uses it for its purpose: does it do what it should?
     let ai: TestReport["ai"];
+    let aiError: string | undefined;
     if (scriptedPass && challenge && !frozen && !slowBrowser) {
       ai = await aiPlaytest(browser, url, challenge).catch((err) => {
         console.warn("AI playtester couldn't finish; using the scripted test alone", err);
+        aiError = (err instanceof Error ? err.message : String(err)).replace(/\u001b\[\d+m/g, "").slice(0, 200);
         return undefined;
       });
     }
@@ -342,6 +344,7 @@ export async function playtestWith(
       ms: Date.now() - t0,
       screenshot,
       ...(ai ? { ai } : {}),
+      ...(aiError ? { aiError } : {}),
       ...(slowBrowser ? { slowBrowser: true } : {}),
     };
   } finally {

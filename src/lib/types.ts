@@ -22,6 +22,9 @@ export type TestReport = {
   // What the AI tester did and found (absent if it didn't get to test).
   // kind is what it decided the entry is: a game, a tool, a toy, a visual…
   ai?: { moves: string[]; bugs: string[]; summary: string; costUsd: number; kind?: string };
+  // Why the AI tester didn't report, when it tried and couldn't finish. Recorded so a
+  // replay can tell "the tester found nothing wrong" apart from "the tester never ran".
+  aiError?: string;
   // The test browser drew too few frames a second to judge the controls fairly.
   slowBrowser?: boolean;
 };
@@ -54,7 +57,15 @@ export type BattleData = {
     ms?: number;
   };
   test: { gladiator: string } & TestReport;
-  verdict: { winner: string; headline: string; scores: Score[]; sawScreenshots?: boolean };
+  verdict: {
+    winner: string;
+    headline: string;
+    scores: Score[];
+    sawScreenshots?: boolean;
+    // The judge saw the entries as "Entry A" to "Entry D", in a shuffled order, with no
+    // model names. Verdicts from before blind judging don't have this.
+    blind?: boolean;
+  };
   replay: { id: string };
   done: { ok: boolean };
 };

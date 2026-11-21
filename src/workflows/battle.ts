@@ -86,10 +86,14 @@ export async function battleWorkflow({ battleId, challenge, startedAt, rematch }
 
     const entries = await Promise.all(GLADIATORS.map((g) => fight(g.id, g.name)));
 
-    try {
-      winner = record(await judgeStep({ challenge, entries })).winner;
-    } catch {
-      // No verdict this time; the replay is still worth keeping.
+    // Nothing to judge if no gladiator produced an entry (in one battle every model call
+    // failed on an expired login, and the judge still crowned a winner on 0/30).
+    if (entries.some((e) => e.html)) {
+      try {
+        winner = record(await judgeStep({ challenge, entries })).winner;
+      } catch {
+        // No verdict this time; the replay is still worth keeping.
+      }
     }
   } finally {
     await finishBattleStep({ battleId, challenge, startedAt, winner, events, rematchOf: rematch?.of });

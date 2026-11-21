@@ -141,6 +141,9 @@ export function LiveArena() {
           <Link href="/replays" className="text-sm text-stone-400 underline-offset-4 hover:text-stone-100 hover:underline">
             No key? Watch the replays
           </Link>
+          <Link href="/leaderboard" className="text-sm text-stone-400 underline-offset-4 hover:text-stone-100 hover:underline">
+            Leaderboard
+          </Link>
         </div>
         {error && <p className="font-mono text-sm text-red-400">{error}</p>}
       </form>

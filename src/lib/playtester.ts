@@ -54,17 +54,27 @@ const Move = z.object({
   reason: z.string().optional(),
   kind: z.string().optional(),
   summary: z.string().optional(),
-  bugs: z.array(z.object({ what: z.string(), evidence: z.string().optional() })).optional(),
+  bugs: z.array(z.object({ what: z.string(), evidence: z.string().nullish() })).optional(),
 });
 type Move = z.infer<typeof Move>;
 
 // Small models sometimes wrap their JSON in prose or a code fence: take the first object.
+// They're also loose with types, so tidy the common slips before checking it: fields
+// they don't use set to null ("x": null), numbers as strings ("ms": "800"), a capital
+// letter on the move, or bugs as plain sentences. Without this, a tester that answers
+// that way has every move rejected and gives up without testing anything.
 function parseMove(text: string): Move | undefined {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start < 0 || end <= start) return undefined;
   try {
-    const parsed = Move.safeParse(JSON.parse(text.slice(start, end + 1)));
+    const raw = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+    const tidy = Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== null && v !== ""));
+    if (typeof tidy.move === "string") tidy.move = tidy.move.toLowerCase().trim();
+    for (const k of ["x", "y", "ms"]) if (typeof tidy[k] === "string") tidy[k] = Number(tidy[k]);
+    for (const k of ["target", "text", "key"]) if (typeof tidy[k] === "number") tidy[k] = String(tidy[k]);
+    if (Array.isArray(tidy.bugs)) tidy.bugs = tidy.bugs.map((b) => (typeof b === "string" ? { what: b } : b));
+    const parsed = Move.safeParse(tidy);
     return parsed.success ? parsed.data : undefined;
   } catch {
     return undefined;

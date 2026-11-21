@@ -16,16 +16,23 @@ const JUDGE_SYSTEM =
   "Where a screenshot follows an entry, it shows the page right after it was tested. Use it to judge how it looks and " +
   "whether it appears to work: an entry that looks broken or empty has a real flaw however good its code reads. It is " +
   "one moment, so a start screen, an empty state or a game-over screen is fine. " +
-  "Only files marked UNFINISHED, or with clear bugs, score low on polish and fidelity. Be specific in roasts.";
+  "Only files marked UNFINISHED, or with clear bugs, score low on polish and fidelity. Be specific in roasts. " +
+  "The entries are anonymous and in a random order: refer to them only as Entry A, Entry B and so on, never guess " +
+  "which model wrote one, and judge each on its own merits.";
 
-// Built per battle so the judge must score every gladiator, by its exact id, once.
+// Blind judging. The judge sees "Entry A" to "Entry D" in a shuffled order, never the
+// model names: a judge that knows who wrote what can favour a name, and one that always
+// sees the entries in the same order can favour a position.
+const LETTERS = "ABCDEFGH";
+
+// Built per battle so the judge must score every entry, by its letter, once.
 // In an early battle a looser schema let the judge skip a complete entry.
 const verdictSchemaFor = (ids: [string, ...string[]]) =>
   z.object({
     scores: z
       .array(
         z.object({
-          gladiator: z.enum(ids).describe("the gladiator id exactly as given"),
+          gladiator: z.enum(ids).describe("the entry's letter exactly as given, e.g. A"),
           creativity: z.number().min(0).max(10),
           polish: z.number().min(0).max(10),
           fidelity: z.number().min(0).max(10).describe("how faithfully it met the challenge"),
@@ -33,8 +40,8 @@ const verdictSchemaFor = (ids: [string, ...string[]]) =>
         }),
       )
       .length(ids.length)
-      .describe("exactly one score for every gladiator, including any that failed")
-      .refine((scores) => new Set(scores.map((s) => s.gladiator)).size === ids.length, "score every gladiator once"),
+      .describe("exactly one score for every entry, including any that failed")
+      .refine((scores) => new Set(scores.map((s) => s.gladiator)).size === ids.length, "score every entry once"),
     headline: z.string().describe("a sports-commentator headline for the battle, max 12 words"),
   });
 
@@ -48,24 +55,33 @@ function playtest(e: JudgeEntry) {
       ? ` · AI tester${e.test.ai.kind ? ` (tested it as a ${e.test.ai.kind})` : ""} found: ${e.test.ai.bugs.join(" | ").slice(0, 300)}`
       : ` · AI tester${e.test.ai.kind ? ` (tested it as a ${e.test.ai.kind})` : ""}: it worked${e.test.ai.summary ? ` (${e.test.ai.summary.slice(0, 160)})` : ""}`
     : "";
+  const notRun = !e.test.ai && e.test.aiError ? " · the AI tester couldn't run" : "";
   const slow = e.test.slowBrowser ? " (the test browser ran too slowly to check it properly)" : "";
-  if (e.test.passed) return ` · browser test: passed${after || " first time"}${slow}${ai}`;
+  if (e.test.passed) return ` · browser test: passed${after || " first time"}${slow}${ai}${notRun}`;
   const problems = [...e.test.errors, ...(e.test.blank ? ["the screen stayed empty"] : [])];
   return ` · browser test: ${fixes ? `still failing${after}` : "failed"}${problems.length ? `: ${problems.join(" | ").slice(0, 400)}` : ""}${slow}${ai}`;
 }
 
 export async function judgeBattle(
   challenge: string,
-  entries: JudgeEntry[],
+  gladiators: JudgeEntry[],
 ) {
+  // Shuffle, then letter: the first entry the judge reads is a different gladiator each time.
+  const entries = gladiators
+    .map((g) => ({ g, key: Math.random() }))
+    .sort((a, b) => a.key - b.key)
+    .map(({ g }, i) => ({ ...g, label: LETTERS[i] }));
+  const idOf = new Map(entries.map((e) => [e.label, e.id]));
+  const nameOf = new Map(entries.map((e) => [e.label, e.name]));
+
   // Show the judge up to 40,000 characters of each entry (about 10,000 tokens), and
   // tell it in code whether the file is finished. In the first battle the judge saw
   // only 12,000 characters, mistook two complete games for unfinished ones, and
   // crowned the shortest entry.
-  const exhibit = (e: JudgeEntry) => {
-    if (!e.html) return `### Gladiator "${e.id}" (${e.name})\n(no entry: it failed)`;
+  const exhibit = (e: JudgeEntry & { label: string }) => {
+    if (!e.html) return `### Entry ${e.label}\n(no entry: it failed)`;
     const complete = /<\/html>\s*$/i.test(e.html);
-    const header = `### Gladiator "${e.id}" (${e.name}) · ${e.html.length.toLocaleString("en-GB")} characters · ${
+    const header = `### Entry ${e.label} · ${e.html.length.toLocaleString("en-GB")} characters · ${
       complete ? "the file is complete" : "the file is UNFINISHED: it stops before </html>"
     }${playtest(e)}`;
     const shown =
@@ -85,7 +101,7 @@ export async function judgeBattle(
         { type: "text", text: `\n\n${exhibit(e)}` },
         ...(shot
           ? ([
-              { type: "text", text: `\nScreenshot of gladiator "${e.id}"'s entry after it was tested:` },
+              { type: "text", text: `\nScreenshot of entry ${e.label} after it was tested:` },
               { type: "file", data: shot.replace(/^data:[^,]+,/, ""), mediaType: "image/jpeg" },
             ] as const)
           : []),
@@ -93,7 +109,7 @@ export async function judgeBattle(
     }),
   ];
 
-  const verdictSchema = verdictSchemaFor(entries.map((e) => e.id) as [string, ...string[]]);
+  const verdictSchema = verdictSchemaFor(entries.map((e) => e.label) as [string, ...string[]]);
   const ask = async (model: string, timeoutMs: number, withScreenshots: boolean) =>
     (
       await generateText({
@@ -138,9 +154,16 @@ export async function judgeBattle(
   }
   if (!output) throw lastError;
 
+  // Back from letters to gladiators, and from "Entry B" to a name people recognise.
+  const named = (text: string) => text.replace(/\bEntry ([A-H])\b/g, (m, l: string) => nameOf.get(l) ?? m);
   const scores: Score[] = output.scores
-    .map((s) => ({ ...s, total: Math.round((s.creativity + s.polish + s.fidelity) * 10) / 10 }))
+    .map((s) => ({
+      ...s,
+      gladiator: idOf.get(s.gladiator) ?? s.gladiator,
+      roast: named(s.roast),
+      total: Math.round((s.creativity + s.polish + s.fidelity) * 10) / 10,
+    }))
     .sort((a, b) => b.total - a.total);
 
-  return { winner: scores[0]?.gladiator ?? "", headline: output.headline, scores, sawScreenshots };
+  return { winner: scores[0]?.gladiator ?? "", headline: named(output.headline), scores, sawScreenshots, blind: true };
 }

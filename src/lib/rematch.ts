@@ -19,6 +19,9 @@ const ordinal = (n: number) =>
 export function planRematch(replay: Replay, gladiatorIds: string[]): RematchPlan | null {
   const verdict = replay.events.findLast((e) => e.type === "verdict")?.data as BattleData["verdict"] | undefined;
   if (!verdict) return null; // nothing to learn from
+  // A battle where no gladiator produced an entry (say, every model call failed) has a
+  // verdict of zeros that says nothing about anyone's work.
+  if (!replay.events.some((e) => e.type === "status" && e.data.status === "live")) return null;
 
   const lastTest = (id: string) =>
     replay.events.findLast((e) => e.type === "test" && e.data.gladiator === id)?.data as BattleData["test"] | undefined;

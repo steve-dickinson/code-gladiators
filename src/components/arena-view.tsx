@@ -201,6 +201,7 @@ function GladiatorCard({
               {!t.passed && t.errors.length > 0 && ` · ${t.errors.length} error${t.errors.length > 1 ? "s" : ""}`}
               {!t.passed && t.blank && " · blank"}
               {t.ai && (t.ai.bugs.length ? ` · AI: ${t.ai.bugs.length} bug${t.ai.bugs.length > 1 ? "s" : ""}` : " · AI ✓")}
+              {!t.ai && t.aiError && <span className="text-stone-500"> · AI didn&apos;t run</span>}
             </span>
           ))}
           <span className="flex-1" />
@@ -260,6 +261,7 @@ function testSummary(t: GladiatorView["tests"][number]) {
     ...(t.blank ? ["the screen stayed empty"] : []),
     ...(t.ai?.bugs ?? []).map((b) => `AI tester: ${b}`),
   ];
+  if (t.aiError) lines.push(`The AI tester couldn't finish: ${t.aiError}`);
   if (lines.length) return lines.join("\n");
   if (t.slowBrowser) return "No errors (the test browser ran too slowly to check it properly)";
   if (!t.ai) return "No errors";
