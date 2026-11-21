@@ -34,6 +34,13 @@ export type BattleData = {
     challenge: string;
     maxRounds?: number;
     gladiators: { id: string; name: string; model: string; colour: string }[];
+    // Present when this battle is a rematch: see src/lib/rematch.ts.
+    rematch?: {
+      of: string; // the replay id of the battle being rematched
+      coached: string[]; // gladiators who were shown their feedback; the rest are the control group
+      previous: Record<string, { total: number; rank: number }>; // last time's scores
+      feedback: Record<string, string>; // exactly what each coached gladiator was told
+    };
   };
   delta: { gladiator: string; text: string };
   status: {
@@ -68,5 +75,6 @@ export type Replay = {
   createdAt: string;
   challenge: string;
   winner?: string;
+  rematchOf?: string;
   events: RecordedEvent[];
 };

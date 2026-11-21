@@ -1,5 +1,6 @@
 import { GLADIATORS, LIMITS } from "@/lib/gladiators";
 import type { JudgeEntry } from "@/lib/judge";
+import type { RematchPlan } from "@/lib/rematch";
 import type { StampedEvent, TestReport } from "@/lib/types";
 import {
   announceStep,
@@ -11,7 +12,7 @@ import {
   writeStep,
 } from "./steps";
 
-export type BattleInput = { battleId: string; challenge: string; startedAt: number };
+export type BattleInput = { battleId: string; challenge: string; startedAt: number; rematch?: RematchPlan };
 
 // One battle, as a durable workflow. Each gladiator writes its game, a real browser
 // plays it, and if anything breaks the gladiator reads the errors and fixes its
@@ -19,7 +20,7 @@ export type BattleInput = { battleId: string; challenge: string; startedAt: numb
 //
 // This function only orchestrates. It must be deterministic (it's replayed from
 // its event log after every step), so all real work lives in the steps.
-export async function battleWorkflow({ battleId, challenge, startedAt }: BattleInput) {
+export async function battleWorkflow({ battleId, challenge, startedAt, rematch }: BattleInput) {
   "use workflow";
 
   const events: StampedEvent[] = [];
@@ -30,7 +31,7 @@ export async function battleWorkflow({ battleId, challenge, startedAt }: BattleI
 
   let winner: string | undefined;
   try {
-    record(await announceStep({ battleId, challenge }));
+    record(await announceStep({ battleId, challenge, rematch }));
 
     // Boot the sandbox and its browser while the models start typing.
     const arenaPromise = openArenaStep(GLADIATORS.map((g) => g.id));
@@ -45,7 +46,9 @@ export async function battleWorkflow({ battleId, challenge, startedAt }: BattleI
 
       for (let round = 1; round <= LIMITS.maxRounds; round++) {
         const previous = html && test ? { html, report: test } : undefined;
-        const written = record(await writeStep({ gladiatorId: id, challenge, round, previous }));
+        // In a rematch, coached gladiators read last time's feedback; the control group doesn't.
+        const feedback = rematch?.feedback[id];
+        const written = record(await writeStep({ gladiatorId: id, challenge, round, previous, feedback }));
         outputTokens += written.outputTokens;
         costUsd += written.costUsd;
         if (!written.html) {
@@ -89,7 +92,7 @@ export async function battleWorkflow({ battleId, challenge, startedAt }: BattleI
       // No verdict this time; the replay is still worth keeping.
     }
   } finally {
-    await finishBattleStep({ battleId, challenge, startedAt, winner, events });
+    await finishBattleStep({ battleId, challenge, startedAt, winner, events, rematchOf: rematch?.of });
   }
   return { battleId, winner };
 }

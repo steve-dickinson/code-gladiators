@@ -114,6 +114,7 @@ export async function aiPlaytest(browser: BrowserSession, url: string, challenge
   if (!now) throw new Error("no screenshot to test from");
   let before: string | undefined;
   const moves: string[] = [];
+  let acted = 0; // moves actually carried out
   let costUsd = 0;
 
   for (let turn = 0; turn <= LIMITS.playtesterActions; turn++) {
@@ -153,6 +154,9 @@ export async function aiPlaytest(browser: BrowserSession, url: string, challenge
     }
 
     if (move.move === "finish" || last) {
+      // A tester that never managed a single move didn't test anything: say so, rather
+      // than letting the entry pass on a test that didn't happen.
+      if (move.move !== "finish" && acted === 0) throw new Error("the AI tester gave no usable moves");
       const bugs = move.move === "finish" ? (move.bugs ?? []) : [];
       return {
         moves,
@@ -207,7 +211,9 @@ export async function aiPlaytest(browser: BrowserSession, url: string, challenge
     before = now;
     now = (await browser.screenshot()) ?? now;
     page = await look();
+    acted++;
     moves.push(move.reason ? `${described}: ${move.reason}` : described);
   }
+  if (acted === 0) throw new Error("the AI tester gave no usable moves");
   return { moves, bugs: [], summary: "Couldn't finish its check.", costUsd };
 }

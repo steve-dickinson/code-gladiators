@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import type { BattleState, GladiatorView } from "@/lib/battle-state";
+import { groupChange } from "@/lib/rematch";
 import { extractHtml } from "@/lib/prompt";
 
 const STATUS_LABEL: Record<GladiatorView["status"], string> = {
@@ -21,8 +23,11 @@ export function ArenaView({ state, mode }: { state: BattleState; mode: "live" | 
   return (
     <section className="space-y-6">
       <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-4">
-        <p className="font-mono text-xs uppercase tracking-[0.2em] text-amber-400">Today&apos;s challenge</p>
+        <p className="font-mono text-xs uppercase tracking-[0.2em] text-amber-400">
+          {state.rematch ? "Rematch" : "Today\u2019s challenge"}
+        </p>
         <p className="mt-1 text-lg text-stone-100">{state.challenge}</p>
+        {state.rematch && <RematchNote state={state} />}
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -33,6 +38,7 @@ export function ArenaView({ state, mode }: { state: BattleState; mode: "live" | 
             mode={mode}
             score={scoreOf(g.id)?.total}
             winner={state.verdict?.winner === g.id}
+            coached={state.rematch?.previous[g.id] ? state.rematch.coached.includes(g.id) : undefined}
           />
         ))}
       </div>
@@ -50,6 +56,7 @@ export function ArenaView({ state, mode }: { state: BattleState; mode: "live" | 
         <div className="rounded-xl border border-stone-700 bg-stone-900/60 p-5">
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-amber-400">The judge has spoken</p>
           <h2 className="mt-1 text-2xl font-semibold text-stone-50">{state.verdict.headline}</h2>
+          {state.rematch && <RematchResult state={state} />}
           {state.verdict.sawScreenshots && (
             <p className="mt-1 font-mono text-xs text-stone-500">Judged on the code and a screenshot of each entry after it was tested.</p>
           )}
@@ -83,6 +90,13 @@ export function ArenaView({ state, mode }: { state: BattleState; mode: "live" | 
                       <span className="font-mono text-sm text-stone-400">
                         {s.total}/30 · creativity {s.creativity} · polish {s.polish} · fidelity {s.fidelity}
                       </span>
+                      {state.rematch?.previous[s.gladiator] && (
+                        <ScoreChange
+                          before={state.rematch.previous[s.gladiator].total}
+                          now={s.total}
+                          coached={state.rematch.coached.includes(s.gladiator)}
+                        />
+                      )}
                     </div>
                     <p className="text-stone-300 italic">“{s.roast}”</p>
                   </div>
@@ -96,7 +110,19 @@ export function ArenaView({ state, mode }: { state: BattleState; mode: "live" | 
   );
 }
 
-function GladiatorCard({ g, mode, score, winner }: { g: GladiatorView; mode: "live" | "replay"; score?: number; winner: boolean }) {
+function GladiatorCard({
+  g,
+  mode,
+  score,
+  winner,
+  coached,
+}: {
+  g: GladiatorView;
+  mode: "live" | "replay";
+  score?: number;
+  winner: boolean;
+  coached?: boolean;
+}) {
   const [tab, setTab] = useState<"auto" | "code" | "preview">("auto");
   const [picked, setPicked] = useState<number>(); // a version the viewer chose to look at
   const done = g.status === "live";
@@ -119,6 +145,11 @@ function GladiatorCard({ g, mode, score, winner }: { g: GladiatorView; mode: "li
         <div className="min-w-0 flex-1">
           <p className="truncate font-semibold text-stone-100">
             {g.name} {winner && <span className="ml-1 font-mono text-xs text-amber-400">WINNER</span>}
+            {coached !== undefined && (
+              <span className={`ml-2 rounded px-1.5 py-0.5 font-mono text-[10px] uppercase ${coached ? "bg-sky-900 text-sky-200" : "bg-stone-800 text-stone-400"}`}>
+                {coached ? "coached" : "control"}
+              </span>
+            )}
           </p>
           <p className="truncate font-mono text-xs text-stone-500">{g.model}</p>
         </div>
@@ -260,5 +291,67 @@ function GameFrame(props: { title: string; src?: string; srcDoc?: string }) {
         style={{ width: GAME.width, height: GAME.height, transform: `scale(${scale})`, transformOrigin: "0 0" }}
       />
     </div>
+  );
+}
+
+// Rematches: who was coached, and exactly what they were told.
+function RematchNote({ state }: { state: BattleState }) {
+  const plan = state.rematch!;
+  const name = (id: string) => state.gladiators.find((g) => g.id === id)?.name ?? id;
+  const control = Object.keys(plan.previous).filter((id) => !plan.coached.includes(id));
+  return (
+    <div className="mt-2 space-y-1 text-sm text-stone-400">
+      <p>
+        A rematch of{" "}
+        <Link href={`/replays/${plan.of}`} className="text-amber-400 hover:underline">
+          an earlier battle
+        </Link>
+        . <span className="text-sky-300">Coached</span> (shown the judge&apos;s verdict on their last entry):{" "}
+        {plan.coached.map(name).join(" and ")}. <span className="text-stone-300">Control</span> (no feedback):{" "}
+        {control.map(name).join(" and ")}. The judge doesn&apos;t know which is which.
+      </p>
+      <details>
+        <summary className="cursor-pointer font-mono text-xs text-stone-500 hover:text-stone-300">What the coached gladiators were told</summary>
+        <div className="mt-2 space-y-3">
+          {plan.coached.map((id) => (
+            <div key={id}>
+              <p className="font-mono text-xs text-sky-300">{name(id)}</p>
+              <pre className="whitespace-pre-wrap font-mono text-xs text-stone-400">{plan.feedback[id]}</pre>
+            </div>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function ScoreChange({ before, now, coached }: { before: number; now: number; coached: boolean }) {
+  const diff = Math.round((now - before) * 10) / 10;
+  const colour = diff > 0 ? "text-emerald-400" : diff < 0 ? "text-red-400" : "text-stone-400";
+  return (
+    <span className="font-mono text-xs text-stone-500">
+      last time {before} → <span className={colour}>{diff > 0 ? `+${diff}` : diff}</span>
+      {coached ? " \u00b7 coached" : " \u00b7 control"}
+    </span>
+  );
+}
+
+// The headline result of a rematch: did the coached half move more than the control half?
+function RematchResult({ state }: { state: BattleState }) {
+  if (!state.rematch || !state.verdict) return null;
+  const { coached, control } = groupChange(state.rematch, state.verdict.scores);
+  if (coached === undefined || control === undefined) return null;
+  const sign = (n: number) => (n > 0 ? `+${n}` : `${n}`);
+  const gap = Math.round((coached - control) * 10) / 10;
+  const reading =
+    Math.abs(gap) < 1.5
+      ? "About the same: no sign the feedback helped this time."
+      : gap > 0
+        ? "The coached gladiators improved more."
+        : "The control group did better: the feedback didn't help this time.";
+  return (
+    <p className="mt-2 rounded-lg bg-stone-800/60 px-3 py-2 font-mono text-xs text-stone-300">
+      Average change since last time: coached {sign(coached)}, control {sign(control)}. {reading}
+    </p>
   );
 }

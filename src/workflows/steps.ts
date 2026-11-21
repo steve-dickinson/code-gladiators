@@ -6,6 +6,7 @@ import { GATEWAY_TAGS, GLADIATORS, LIMITS } from "@/lib/gladiators";
 import { judgeBattle, type JudgeEntry } from "@/lib/judge";
 import { extractHtml, fixPrompt, GLADIATOR_SYSTEM, gladiatorPrompt } from "@/lib/prompt";
 import { REPLAYS_TAG, saveReplay } from "@/lib/replays";
+import type { RematchPlan } from "@/lib/rematch";
 import type { BattleData, BattleEvent, RecordedEvent, StampedEvent, TestReport } from "@/lib/types";
 
 // Every step does real work (call a model, drive a browser, save a file) and runs
@@ -29,7 +30,7 @@ function recorder() {
   return { emit, events, release: () => writer.releaseLock() };
 }
 
-export async function announceStep(input: { battleId: string; challenge: string }) {
+export async function announceStep(input: { battleId: string; challenge: string; rematch?: RematchPlan }) {
   "use step";
   const { emit, events, release } = recorder();
   await emit("battle", {
@@ -37,6 +38,7 @@ export async function announceStep(input: { battleId: string; challenge: string 
     challenge: input.challenge,
     maxRounds: LIMITS.maxRounds,
     gladiators: GLADIATORS.map(({ id, name, model, colour }) => ({ id, name, model, colour })),
+    ...(input.rematch ? { rematch: input.rematch } : {}),
   });
   for (const g of GLADIATORS) await emit("status", { gladiator: g.id, status: "writing", round: 1 });
   release();
@@ -59,6 +61,7 @@ export async function writeStep(input: {
   challenge: string;
   round: number;
   previous?: { html: string; report: TestReport };
+  feedback?: string; // a rematch's feedback from last time (coached gladiators only)
 }) {
   "use step";
   const g = GLADIATORS.find((x) => x.id === input.gladiatorId)!;
@@ -72,11 +75,11 @@ export async function writeStep(input: {
       system: GLADIATOR_SYSTEM,
       messages: input.previous
         ? [
-            { role: "user", content: gladiatorPrompt(input.challenge) },
+            { role: "user", content: gladiatorPrompt(input.challenge, input.feedback) },
             { role: "assistant", content: input.previous.html },
             { role: "user", content: fixPrompt(input.previous.report) },
           ]
-        : [{ role: "user", content: gladiatorPrompt(input.challenge) }],
+        : [{ role: "user", content: gladiatorPrompt(input.challenge, input.feedback) }],
       maxOutputTokens: LIMITS.maxOutputTokens,
       abortSignal: AbortSignal.timeout(LIMITS.writeTimeoutMs),
       providerOptions: { ...g.providerOptions, gateway: { tags: GATEWAY_TAGS } },
@@ -176,6 +179,7 @@ export async function finishBattleStep(input: {
   startedAt: number;
   winner?: string;
   events: StampedEvent[];
+  rematchOf?: string;
 }) {
   "use step";
   const { emit, release } = recorder();
@@ -189,6 +193,7 @@ export async function finishBattleStep(input: {
       createdAt: new Date(input.startedAt).toISOString(),
       challenge: input.challenge,
       winner: input.winner,
+      ...(input.rematchOf ? { rematchOf: input.rematchOf } : {}),
       events: recorded,
     });
     try {

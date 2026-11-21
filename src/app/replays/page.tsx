@@ -20,7 +20,12 @@ export default async function ReplaysPage() {
                 href={`/replays/${r.id}`}
                 className="block h-full rounded-xl border border-stone-800 bg-stone-900/50 p-4 hover:border-amber-500"
               >
-                <p className="text-stone-100">{r.challenge}</p>
+                <p className="text-stone-100">
+                  {r.rematchOf && (
+                    <span className="mr-2 rounded bg-sky-900 px-1.5 py-0.5 align-middle font-mono text-[10px] uppercase text-sky-200">rematch</span>
+                  )}
+                  {r.challenge}
+                </p>
                 <p className="mt-3 font-mono text-xs text-stone-500">
                   {new Date(r.createdAt).toLocaleDateString("en-GB")}
                   {winner && <> · won by <span style={{ color: winner.colour }}>{winner.name}</span></>}

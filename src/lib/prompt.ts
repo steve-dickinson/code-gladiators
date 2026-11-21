@@ -11,8 +11,9 @@ Rules:
 - Make it delightful: a judge scores creativity, polish and how faithfully you followed the challenge.
 - Keep it under 400 lines. Finish the file: an unfinished file scores zero.`;
 
-export function gladiatorPrompt(challenge: string) {
-  return `Challenge: ${challenge}`;
+// In a rematch, a coached gladiator also reads its feedback from last time.
+export function gladiatorPrompt(challenge: string, feedback?: string) {
+  return feedback ? `Challenge: ${challenge}\n\n${feedback}` : `Challenge: ${challenge}`;
 }
 
 // After a failed playtest, the gladiator sees exactly what the browser saw.

@@ -24,6 +24,7 @@ export type BattleState = {
   id?: string;
   challenge?: string;
   maxRounds?: number;
+  rematch?: BattleData["battle"]["rematch"];
   gladiators: GladiatorView[];
   verdict?: BattleData["verdict"];
   replayId?: string;
@@ -43,6 +44,7 @@ export function battleReducer(state: BattleState, action: BattleAction): BattleS
         id: action.data.id,
         challenge: action.data.challenge,
         maxRounds: action.data.maxRounds,
+        rematch: action.data.rematch,
         gladiators: action.data.gladiators.map((g) => ({
           ...g,
           versions: [""],

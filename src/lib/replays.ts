@@ -10,7 +10,7 @@ import type { Replay } from "./types";
 // list() calls are "advanced operations", and only 2,000 are included each month.
 // This design costs 3 per battle (save, check, update the index) and 0 per page view.
 
-export type ReplaySummary = { id: string; challenge: string; winner?: string; createdAt: string };
+export type ReplaySummary = { id: string; challenge: string; winner?: string; createdAt: string; rematchOf?: string };
 
 export const REPLAYS_TAG = "replays";
 const INDEX = "replays/index.json";
@@ -38,7 +38,13 @@ async function writeJson(pathname: string, data: unknown) {
   });
 }
 
-const summarise = ({ id, challenge, winner, createdAt }: Replay): ReplaySummary => ({ id, challenge, winner, createdAt });
+const summarise = ({ id, challenge, winner, createdAt, rematchOf }: Replay): ReplaySummary => ({
+  id,
+  challenge,
+  winner,
+  createdAt,
+  ...(rematchOf ? { rematchOf } : {}),
+});
 
 export async function saveReplay(replay: Replay) {
   await writeJson(`replays/${replay.id}.json`, replay);

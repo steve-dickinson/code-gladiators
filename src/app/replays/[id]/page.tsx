@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { RematchButton } from "@/components/rematch-button";
 import { ReplayPlayer } from "@/components/replay-player";
 import { getReplay } from "@/lib/replays";
 
@@ -25,5 +26,20 @@ export default function ReplayPage({ params }: PageProps<"/replays/[id]">) {
 async function LoadedReplay({ params }: { params: Promise<{ id: string }> }) {
   const replay = await getReplay((await params).id);
   if (!replay) notFound();
-  return <ReplayPlayer replay={replay} />;
+  const judged = replay.events.some((e) => e.type === "verdict");
+  return (
+    <div className="space-y-6">
+      {replay.rematchOf && (
+        <p className="font-mono text-xs text-stone-500">
+          A rematch of{" "}
+          <Link href={`/replays/${replay.rematchOf}`} className="text-amber-400 hover:underline">
+            an earlier battle
+          </Link>
+          .
+        </p>
+      )}
+      <ReplayPlayer replay={replay} />
+      {judged && <RematchButton replayId={replay.id} />}
+    </div>
+  );
 }
