@@ -13,7 +13,7 @@ export type BenchmarkChallenge = {
   challenge: string;
 };
 
-/** How many times each challenge is run. */
+/** How many times each challenge is run. Only the first this-many valid runs count. */
 export const BENCHMARK_RUNS = 3;
 
 /** Battles before this were played under different rules and don't count. */
@@ -26,7 +26,6 @@ export const BENCHMARK_VOID: Record<string, string> = {
   "2026-11-21-847977ad": "HTML extraction bug discarded a complete entry",
   "2026-11-21-091a8fa0": "HTML extraction bug discarded a complete entry",
   "2026-11-21-e23e2f33": "HTML extraction bug discarded a complete entry",
-  "2026-11-21-2aa047c0": "an extra, fourth run of the unit converter",
 };
 
 export const BENCHMARK: BenchmarkChallenge[] = [

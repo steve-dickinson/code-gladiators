@@ -1,4 +1,4 @@
-import { BENCHMARK, BENCHMARK_CATEGORIES, BENCHMARK_FROM, BENCHMARK_VOID, benchmarkOf, type BenchmarkCategory } from "./benchmark";
+import { BENCHMARK, BENCHMARK_CATEGORIES, BENCHMARK_FROM, BENCHMARK_RUNS, BENCHMARK_VOID, benchmarkOf, type BenchmarkCategory } from "./benchmark";
 import { battleOf, hasEntries, statusesOf, testsOf, verdictOf } from "./replay-events";
 import type { BattleData, Replay } from "./types";
 import { mean, median, roundTo } from "./utils";
@@ -72,10 +72,11 @@ export function computeLeaderboard(replays: Replay[], scope: LeaderboardScope = 
   const board: Leaderboard = { battles: 0, voided: 0, coachedLeftOut: 0, judged: 0, blind: 0, sawScreenshots: 0, models: [] };
   const tallies = new Map<string, Tally>();
   const dates: string[] = [];
+  const countedRuns = scope === "all" || scope === "tested" ? undefined : countedBenchmarkRuns(replays);
 
   for (const replay of replays) {
     const battle = battleOf(replay);
-    if (!battle || !inScope(replay, battle, scope)) continue;
+    if (!battle || !inScope(replay, battle, scope, countedRuns)) continue;
     if (!hasEntries(replay)) {
       board.voided++;
       continue;
@@ -107,16 +108,33 @@ export function computeLeaderboard(replays: Replay[], scope: LeaderboardScope = 
   return board;
 }
 
-/** The benchmark: overall standings, standings per category, and how many runs each challenge has. */
+/**
+ * The benchmark: overall standings, standings per category, and how many valid runs each
+ * challenge has (which can exceed BENCHMARK_RUNS; only the first BENCHMARK_RUNS count).
+ */
 export function computeBenchmark(replays: Replay[]) {
+  const runs = validBenchmarkRuns(replays);
   return {
     overall: computeLeaderboard(replays, "benchmark"),
     byCategory: BENCHMARK_CATEGORIES.map((category) => ({ category, board: computeLeaderboard(replays, category) })),
-    runs: BENCHMARK.map((challenge) => ({
-      ...challenge,
-      runs: replays.filter((r) => benchmarkOf(r.challenge)?.id === challenge.id && countsForBenchmark(r) && hasEntries(r)).length,
-    })),
+    runs: BENCHMARK.map((challenge) => ({ ...challenge, runs: runs.get(challenge.id)?.length ?? 0 })),
   };
+}
+
+/** Valid runs of each benchmark challenge, oldest first. */
+function validBenchmarkRuns(replays: Replay[]): Map<string, Replay[]> {
+  const runs = new Map<string, Replay[]>();
+  const valid = replays.filter((r) => countsForBenchmark(r) && hasEntries(r)).toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
+  for (const replay of valid) {
+    const challenge = benchmarkOf(replay.challenge);
+    if (challenge) runs.set(challenge.id, [...(runs.get(challenge.id) ?? []), replay]);
+  }
+  return runs;
+}
+
+/** The ids of the runs that count: the first BENCHMARK_RUNS valid runs of each challenge, so extra runs can't tip the results. */
+export function countedBenchmarkRuns(replays: Replay[]): Set<string> {
+  return new Set([...validBenchmarkRuns(replays).values()].flatMap((runs) => runs.slice(0, BENCHMARK_RUNS).map((r) => r.id)));
 }
 
 /** A benchmark run counts if it isn't a rematch, was judged blind, and was run under the current rules. */
@@ -129,11 +147,11 @@ export function countsForBenchmark(replay: Replay): boolean {
   );
 }
 
-function inScope(replay: Replay, battle: BattleData["battle"], scope: LeaderboardScope): boolean {
+function inScope(replay: Replay, battle: BattleData["battle"], scope: LeaderboardScope, countedRuns?: Set<string>): boolean {
   if (scope === "all") return true;
   if (scope === "tested") return testsOf(replay).length > 0;
   const challenge = benchmarkOf(battle.challenge);
-  if (!challenge || !countsForBenchmark(replay)) return false;
+  if (!challenge || !countedRuns?.has(replay.id)) return false;
   return scope === "benchmark" || challenge.category === scope;
 }
 

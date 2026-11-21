@@ -8,11 +8,12 @@ import { ArenaView } from "./arena-view";
 import { BenchmarkRunner, type BattleOutcome } from "./benchmark-runner";
 import { useBattleStream } from "./use-battle-stream";
 
+/** Suggestions for free battles. None is a benchmark challenge, so clicking one never adds a benchmark run. */
 const IDEAS = [
   "Build Snake, but the snake is afraid of the dark",
   "A tiny piano that turns your typing into music",
-  "Breakout where the bricks fight back",
-  "A cat that follows your cursor and judges your life choices",
+  "Pong, but the ball gets bored and wanders off",
+  "A houseplant that wilts when you ignore it",
 ];
 
 export function LiveArena() {

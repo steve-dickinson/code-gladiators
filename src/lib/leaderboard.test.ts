@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { makeReplay } from "@/test/replay-fixtures";
 import { BENCHMARK, BENCHMARK_FROM, BENCHMARK_VOID } from "./benchmark";
-import { computeBenchmark, computeLeaderboard, countsForBenchmark } from "./leaderboard";
+import { computeBenchmark, computeLeaderboard, countedBenchmarkRuns, countsForBenchmark } from "./leaderboard";
 
 const snake = BENCHMARK.find((b) => b.id === "snake")!.challenge;
 const afterBenchmarkStart = "2026-11-21T12:00:00.000Z";
@@ -83,5 +83,17 @@ describe("computeBenchmark", () => {
     const games = benchmark.byCategory.find((c) => c.category === "Games")!.board;
     expect(games.models.find((m) => m.id === "alpha")?.avgScore).toBe(23);
     expect(benchmark.byCategory.find((c) => c.category === "Tools")!.board.battles).toBe(0);
+  });
+});
+
+describe("countedBenchmarkRuns", () => {
+  it("counts only the first runs of each challenge, so extra runs can't tip the results", () => {
+    const runs = ["11", "12", "13", "14"].map((hour, i) =>
+      makeReplay({ id: `s${i}`, challenge: snake, createdAt: `2026-11-21T${hour}:00:00.000Z`, gladiators: [{ id: "alpha", total: 20 + i }, { id: "beta", total: 25 }] }),
+    );
+    expect([...countedBenchmarkRuns(runs.toReversed())].sort()).toEqual(["s0", "s1", "s2"]);
+    const benchmark = computeBenchmark(runs);
+    expect(benchmark.runs.find((r) => r.id === "snake")?.runs).toBe(4);
+    expect(benchmark.overall.battles).toBe(3);
   });
 });
