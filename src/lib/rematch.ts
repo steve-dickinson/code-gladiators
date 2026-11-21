@@ -1,57 +1,29 @@
-import type { BattleData, Replay } from "./types";
+import { hasEntries, testsOf, verdictOf } from "./replay-events";
+import type { Replay, RematchPlan, Score } from "./types";
+import { mean, ordinal, roundTo, shuffle } from "./utils";
 
-// Rematches with memory. A rematch runs the same challenge again. Half the gladiators,
-// picked at random, are "coached": before they write, they read the judge's verdict on
-// their last entry and anything the testers found. The other half are the control
-// group and get no feedback at all. If the coached half improves more than the control
-// half, the feedback made the difference; if everyone moves about the same, it was a
-// fresh roll of the dice.
-//
-// To be clear about what "memory" means here: the models don't learn anything. They
-// read last time's feedback in their prompt, which is exactly how people use AI at work.
-// The judge isn't told who was coached, so it judges blind.
+// A rematch runs a saved battle's challenge again. A random half of the gladiators are
+// "coached": they read the judge's verdict on their last entry before writing. The rest
+// are the control group. The judge isn't told which is which. Comparing the two groups'
+// change in score shows whether the feedback helped, rather than chance.
 
-export type RematchPlan = NonNullable<BattleData["battle"]["rematch"]>;
-
-const ordinal = (n: number) =>
-  `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : n % 10 === 1 ? "st" : n % 10 === 2 ? "nd" : n % 10 === 3 ? "rd" : "th"}`;
-
+/** Plans a rematch of `replay`, or returns null if it has nothing to learn from. */
 export function planRematch(replay: Replay, gladiatorIds: string[]): RematchPlan | null {
-  const verdict = replay.events.findLast((e) => e.type === "verdict")?.data as BattleData["verdict"] | undefined;
-  if (!verdict) return null; // nothing to learn from
-  // A battle where no gladiator produced an entry (say, every model call failed) has a
-  // verdict of zeros that says nothing about anyone's work.
-  if (!replay.events.some((e) => e.type === "status" && e.data.status === "live")) return null;
+  const verdict = verdictOf(replay);
+  if (!verdict || !hasEntries(replay)) return null;
 
-  const lastTest = (id: string) =>
-    replay.events.findLast((e) => e.type === "test" && e.data.gladiator === id)?.data as BattleData["test"] | undefined;
-
+  const ranked = verdict.scores; // best first
   const previous: RematchPlan["previous"] = {};
   const feedback: RematchPlan["feedback"] = {};
-  const ranked = verdict.scores; // already sorted, best first
-  for (const [i, s] of ranked.entries()) {
-    if (!gladiatorIds.includes(s.gladiator)) continue; // the lineup has changed since
-    previous[s.gladiator] = { total: s.total, rank: i + 1 };
-    const test = lastTest(s.gladiator);
-    const problems = test && !test.passed ? [...test.errors, ...(test.ai?.bugs ?? [])].slice(0, 3) : [];
-    feedback[s.gladiator] = [
-      `You have taken on this exact challenge before. You came ${ordinal(i + 1)} of ${ranked.length}, scoring ${s.total}/30 ` +
-        `(creativity ${s.creativity}, polish ${s.polish}, fidelity to the challenge ${s.fidelity}).`,
-      `The judge's verdict on your entry: "${s.roast}"`,
-      ...(i > 0 ? [`The winning entry scored ${ranked[0].total}/30.`] : []),
-      ...(problems.length ? [`When your final version was tested, these problems were still there:\n${problems.map((p) => `- ${p}`).join("\n")}`] : []),
-      "Use this feedback to build a better entry this time.",
-    ].join("\n");
+  for (const [i, score] of ranked.entries()) {
+    if (!gladiatorIds.includes(score.gladiator)) continue;
+    previous[score.gladiator] = { total: score.total, rank: i + 1 };
+    feedback[score.gladiator] = feedbackFor(replay, score, i + 1, ranked);
   }
 
-  // Coach a random half of those with a previous score; the rest are the control group.
   const eligible = Object.keys(previous);
   if (eligible.length < 2) return null;
-  const shuffled = eligible
-    .map((id) => ({ id, key: crypto.getRandomValues(new Uint32Array(1))[0] }))
-    .sort((a, b) => a.key - b.key)
-    .map((x) => x.id);
-  const coached = shuffled.slice(0, Math.floor(eligible.length / 2));
+  const coached = shuffle(eligible).slice(0, Math.floor(eligible.length / 2));
 
   return {
     of: replay.id,
@@ -61,16 +33,32 @@ export function planRematch(replay: Replay, gladiatorIds: string[]): RematchPlan
   };
 }
 
-// For the verdict: how much each group moved, on average.
-export function groupChange(plan: RematchPlan, scores: BattleData["verdict"]["scores"]) {
-  const change = (ids: string[]) => {
-    const deltas = ids.flatMap((id) => {
+function feedbackFor(replay: Replay, score: Score, rank: number, ranked: Score[]): string {
+  const finalTest = testsOf(replay, score.gladiator).at(-1);
+  const problems = finalTest && !finalTest.passed ? [...finalTest.errors, ...(finalTest.ai?.bugs ?? [])].slice(0, 3) : [];
+  return [
+    `You have taken on this exact challenge before. You came ${ordinal(rank)} of ${ranked.length}, scoring ${score.total}/30 ` +
+      `(creativity ${score.creativity}, polish ${score.polish}, fidelity to the challenge ${score.fidelity}).`,
+    `The judge's verdict on your entry: "${score.roast}"`,
+    ...(rank > 1 ? [`The winning entry scored ${ranked[0].total}/30.`] : []),
+    ...(problems.length
+      ? [`When your final version was tested, these problems were still there:\n${problems.map((p) => `- ${p}`).join("\n")}`]
+      : []),
+    "Use this feedback to build a better entry this time.",
+  ].join("\n");
+}
+
+/** The average change in score since last time, for the coached and control groups. */
+export function groupChange(plan: RematchPlan, scores: Score[]): { coached?: number; control?: number } {
+  const averageChange = (ids: string[]) => {
+    const changes = ids.flatMap((id) => {
       const now = scores.find((s) => s.gladiator === id);
       const before = plan.previous[id];
       return now && before ? [now.total - before.total] : [];
     });
-    return deltas.length ? Math.round((deltas.reduce((a, b) => a + b, 0) / deltas.length) * 10) / 10 : undefined;
+    const average = mean(changes);
+    return average === undefined ? undefined : roundTo(average);
   };
   const control = Object.keys(plan.previous).filter((id) => !plan.coached.includes(id));
-  return { coached: change(plan.coached), control: change(control) };
+  return { coached: averageChange(plan.coached), control: averageChange(control) };
 }

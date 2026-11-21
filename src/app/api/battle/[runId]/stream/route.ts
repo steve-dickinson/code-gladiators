@@ -3,12 +3,14 @@ import { getRun } from "workflow/api";
 import { REPLAYS_TAG } from "@/lib/replays";
 import type { BattleEvent } from "@/lib/types";
 
-// A battle can outlast one function call (300 seconds on the free plan), so this
-// route streams for up to 4 minutes, then ends. The page reconnects with
-// ?from=<events seen so far> and carries on exactly where it left off.
 export const maxDuration = 300;
+/** Ends the response before the function's time limit; the page reconnects with ?from=. */
 const STREAM_FOR_MS = 240_000;
 
+/**
+ * Streams a battle's events as NDJSON, starting from event number `?from=`. A battle can
+ * outlast one request, so the page reconnects and carries on where it left off.
+ */
 export async function GET(req: Request, ctx: RouteContext<"/api/battle/[runId]/stream">) {
   const { runId } = await ctx.params;
   if (!/^[\w-]+$/.test(runId)) return new Response("Bad run id", { status: 400 });
@@ -26,16 +28,9 @@ export async function GET(req: Request, ctx: RouteContext<"/api/battle/[runId]/s
     async start(controller) {
       const stop = setTimeout(() => reader.cancel().catch(() => {}), STREAM_FOR_MS);
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          // One JSON event per line (NDJSON).
-          controller.enqueue(encoder.encode(JSON.stringify(value) + "\n"));
-          if (value?.type === "replay") {
-            try {
-              revalidateTag(REPLAYS_TAG, "max"); // make sure the gallery shows the new battle
-            } catch {}
-          }
+        for (let next = await reader.read(); !next.done; next = await reader.read()) {
+          controller.enqueue(encoder.encode(JSON.stringify(next.value) + "\n"));
+          if (next.value?.type === "replay") refreshReplayPages();
         }
       } catch (err) {
         console.error("Battle stream broke", err);
@@ -52,4 +47,12 @@ export async function GET(req: Request, ctx: RouteContext<"/api/battle/[runId]/s
   return new Response(body, {
     headers: { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-store" },
   });
+}
+
+function refreshReplayPages() {
+  try {
+    revalidateTag(REPLAYS_TAG, "max");
+  } catch (err) {
+    console.warn("Couldn't revalidate the replay pages", err);
+  }
 }

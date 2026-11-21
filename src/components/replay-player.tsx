@@ -5,8 +5,7 @@ import { ArenaView } from "./arena-view";
 import { battleReducer, emptyBattle } from "@/lib/battle-state";
 import type { Replay } from "@/lib/types";
 
-// Plays a recorded battle back with its original timing.
-// It looks live, but costs nothing: no model calls, no sandbox.
+/** Plays a saved battle back with its original timing. No model calls, no sandbox. */
 export function ReplayPlayer({ replay }: { replay: Replay }) {
   const [state, dispatch] = useReducer(battleReducer, emptyBattle);
   const [speed, setSpeed] = useState(2);

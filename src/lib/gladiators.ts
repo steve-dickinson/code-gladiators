@@ -1,20 +1,21 @@
 import type { streamText } from "ai";
 
+// Who competes, who judges, who tests, and the limits that keep a battle cheap.
+// Every model is an AI Gateway slug: `npm run check-models` shows which ones your
+// account can call and what they cost.
+
 type ProviderOptions = NonNullable<Parameters<typeof streamText>[0]["providerOptions"]>;
 
-// Who fights, who judges, and how much they're allowed to spend.
-// Swap any model for another AI Gateway slug: run `npm run check-models`
-// to see which ones your account can call and what they cost.
-
 export type Gladiator = {
-  id: string; // short, URL-safe: used for sandbox folders and colours
-  name: string; // arena name shown in the UI
-  model: string; // AI Gateway model slug
-  colour: string; // accent colour for the card
-  providerOptions?: ProviderOptions; // extra settings passed to this model's provider
+  /** Short and URL-safe: used in sandbox paths and as the key in every event. */
+  id: string;
+  name: string;
+  /** AI Gateway model slug. */
+  model: string;
+  colour: string;
+  providerOptions?: ProviderOptions;
 };
 
-// Four labs, all callable on the AI Gateway free tier (checked with `npm run check-models -- --scan`).
 export const GLADIATORS: Gladiator[] = [
   { id: "gptoss", name: "GPT-OSS 120B", model: "openai/gpt-oss-120b", colour: "#e8885a" },
   {
@@ -22,9 +23,8 @@ export const GLADIATORS: Gladiator[] = [
     name: "Gemini 2.5 Flash",
     model: "google/gemini-2.5-flash",
     colour: "#5b8def",
-    // Gemini thinks before it writes, and thinking counts against maxOutputTokens.
-    // In the first battle it spent its whole budget thinking and wrote 917 characters.
-    // A budget of 0 switches thinking off, so every token goes on the game.
+    // Gemini's thinking tokens count against maxOutputTokens and can use up the whole
+    // budget before any code is written, so thinking is switched off.
     providerOptions: {
       google: { thinkingConfig: { thinkingBudget: 0 } },
       vertex: { thinkingConfig: { thinkingBudget: 0 } },
@@ -34,34 +34,38 @@ export const GLADIATORS: Gladiator[] = [
   { id: "qwen", name: "Qwen3 Coder Next", model: "alibaba/qwen3-coder-next", colour: "#3fbf8f" },
 ];
 
-// The judge comes from a lab that isn't in the fight, so it has no favourite.
-// If its model is down, AI Gateway falls back to the next one in JUDGE_FALLBACKS automatically.
+// Judges and testers come from labs that aren't competing, so none marks its own lab's work.
+
+/** Judges the code alone. AI Gateway falls back to JUDGE_FALLBACKS if it's unavailable. */
 export const JUDGE_MODEL = "mistral/mistral-large-3";
 export const JUDGE_FALLBACKS = ["zai/glm-4.7"];
-// If the main judge is too slow, a smaller, faster model from the same lab steps in.
+/** Steps in when the main judge is too slow. */
 export const QUICK_JUDGE_MODEL = "mistral/mistral-small";
-// Mistral Large 3 can't see images (checked with `npm run check-models`), so when there
-// are screenshots, a judge that can see them rules first, and Large 3 is the backup.
+/** Judges with screenshots (JUDGE_MODEL can't read images). */
 export const VISION_JUDGE_MODEL = "mistral/mistral-small";
 
-// The AI tester: a cheap model that can see images. It uses each entry for a few moves
-// and reports anything that doesn't work. From a lab that isn't competing, too.
-// `npm run check-models -- --vision` lists the alternatives your account can call.
-export const PLAYTESTER_MODEL = "mistral/mistral-small";
+/**
+ * Uses each entry with a goal and reports what doesn't work. Four testers run at once,
+ * so the fallbacks take over when the first choice is rate-limited.
+ */
+export const AI_TESTER_MODEL = "meta/llama-4-scout";
+export const AI_TESTER_FALLBACKS = ["amazon/nova-lite", "mistral/mistral-small"];
 
-// Cost and time guard rails. Each battle is a Vercel Workflow, so the battle as a
-// whole has no time limit, but every step (one write, one test, one judging) must
-// finish inside a single function's 300 seconds on the free plan.
+// A battle is a durable workflow with no overall time limit, but every step (one write,
+// one test, one judging) must finish within a single function's 300 seconds.
 export const LIMITS = {
-  maxRounds: 3, // write, then up to two rounds of test-and-fix
-  playtesterActions: 6, // moves the AI playtester gets per game, per round
-  playtesterTimeoutMs: 25_000, // per playtester decision
-  maxOutputTokens: 8000, // per gladiator per round: caps the worst-case spend
-  maxChallengeLength: 280, // a tweet-sized challenge keeps prompts cheap
-  writeTimeoutMs: 150_000, // abandon one round of writing after this
-  judgeTimeoutMs: 80_000, // give up on the main judge after this
-  quickJudgeTimeoutMs: 40_000, // and on the quick judge after this
+  /** The first draft plus up to two test-and-fix rounds. */
+  maxRounds: 3,
+  /** Requests the AI tester may make per entry, per round. */
+  aiTesterMoves: 4,
+  aiTesterTimeoutMs: 25_000,
+  /** Per gladiator per round: caps the worst-case spend. */
+  maxOutputTokens: 8000,
+  maxChallengeLength: 280,
+  writeTimeoutMs: 150_000,
+  judgeTimeoutMs: 80_000,
+  quickJudgeTimeoutMs: 40_000,
 };
 
-// Tag every request so AI Gateway's dashboard can report spend for this app alone.
+/** Lets AI Gateway's dashboard report this app's spend on its own. */
 export const GATEWAY_TAGS = ["code-gladiators"];

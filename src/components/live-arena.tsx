@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { BENCHMARK, BENCHMARK_CATEGORIES, benchmarkOf } from "@/lib/benchmark";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { LIMITS } from "@/lib/gladiators";
 import { ArenaView } from "./arena-view";
-import { battleReducer, emptyBattle } from "@/lib/battle-state";
-import type { BattleEvent } from "@/lib/types";
+import { BenchmarkRunner, type BattleOutcome } from "./benchmark-runner";
+import { useBattleStream } from "./use-battle-stream";
 
 const IDEAS = [
   "Build Snake, but the snake is afraid of the dark",
@@ -15,97 +16,34 @@ const IDEAS = [
 ];
 
 export function LiveArena() {
-  const [state, dispatch] = useReducer(battleReducer, emptyBattle);
+  const { state, fighting, error, setError, watch, launch } = useBattleStream();
   const [challenge, setChallenge] = useState("");
-  const [key, setKey] = useState("");
-  const [fighting, setFighting] = useState(false);
-  const [error, setError] = useState<string>();
-  const watching = useRef<AbortController>(null);
+  const [arenaKey, setArenaKey] = useState("");
+  const [benchmarkRunning, setBenchmarkRunning] = useState(false);
 
-  // Follow a battle's event stream. A battle can run longer than one request is
-  // allowed to, so when the stream ends early we reconnect from the number of
-  // events already seen, until the "done" event arrives.
-  const watch = useCallback(async (runId: string) => {
-    watching.current?.abort();
-    const controller = new AbortController();
-    watching.current = controller;
-    dispatch({ type: "reset" });
-    setFighting(true);
-    setError(undefined);
-
-    let seen = 0;
-    let emptyTries = 0;
-    try {
-      while (!controller.signal.aborted) {
-        const res = await fetch(`/api/battle/${runId}/stream?from=${seen}`, { signal: controller.signal });
-        if (!res.ok || !res.body) throw new Error(`Couldn't watch the battle (${res.status})`);
-        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-        let buffer = "";
-        let got = 0;
-        let finished = false;
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += value;
-          let newline;
-          while ((newline = buffer.indexOf("\n")) >= 0) {
-            const line = buffer.slice(0, newline);
-            buffer = buffer.slice(newline + 1);
-            if (!line.trim()) continue;
-            const event = JSON.parse(line) as BattleEvent;
-            seen++;
-            got++;
-            dispatch(event);
-            if (event.type === "done") finished = true;
-          }
-        }
-        if (finished) break;
-        emptyTries = got ? 0 : emptyTries + 1;
-        if (emptyTries >= 3) throw new Error("The battle stream went quiet. Refresh to try again.");
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-    } catch (err) {
-      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (watching.current === controller) setFighting(false);
-    }
-  }, []);
-
-  // Refreshing the page (or opening the link on your phone) picks the battle up again.
+  // A leaderboard "Run" link (/?challenge=calculator) fills in that benchmark challenge.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const runId = params.get("run");
-    const resume = runId ? setTimeout(() => watch(runId)) : undefined; // start watching after this render
-    // A "Run" link from the leaderboard (/?challenge=calculator) fills in that benchmark challenge.
     const picked = BENCHMARK.find((b) => b.id === params.get("challenge"));
-    const fill = picked && !runId ? setTimeout(() => setChallenge(picked.challenge)) : undefined;
-    return () => {
-      clearTimeout(resume);
-      clearTimeout(fill);
-      watching.current?.abort();
-    };
-  }, [watch]);
+    const fill = picked && !params.get("run") ? setTimeout(() => setChallenge(picked.challenge)) : undefined;
+    return () => clearTimeout(fill);
+  }, []);
 
   async function start(e: React.FormEvent) {
     e.preventDefault();
     if (!challenge.trim() || fighting) return;
-    setFighting(true);
-    setError(undefined);
-    try {
-      const res = await fetch("/api/battle", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-arena-key": key },
-        body: JSON.stringify({ challenge }),
-      });
-      const body = (await res.json().catch(() => ({}))) as { runId?: string; error?: string };
-      if (!res.ok || !body.runId) throw new Error(body.error ?? `The arena said no (${res.status})`);
-      window.history.replaceState(null, "", `?run=${body.runId}`);
-      watch(body.runId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setFighting(false);
-    }
+    const runId = await launch(challenge, arenaKey);
+    if (runId) watch(runId);
   }
+
+  async function runBattle(text: string): Promise<BattleOutcome> {
+    setChallenge(text);
+    const runId = await launch(text, arenaKey);
+    if (!runId) return "not-started";
+    return (await watch(runId)) ? "finished" : "stream-lost";
+  }
+
+  const benchmarkChallenge = benchmarkOf(challenge);
 
   return (
     <div className="space-y-8">
@@ -113,7 +51,7 @@ export function LiveArena() {
         <textarea
           value={challenge}
           onChange={(e) => setChallenge(e.target.value)}
-          maxLength={280}
+          maxLength={LIMITS.maxChallengeLength}
           rows={3}
           placeholder="Set the challenge…"
           className="w-full resize-none rounded-xl border border-stone-700 bg-stone-900 px-4 py-3 text-lg text-stone-100 placeholder:text-stone-600 focus:border-amber-500 focus:outline-none"
@@ -132,7 +70,7 @@ export function LiveArena() {
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <select
-            value={benchmarkOf(challenge)?.id ?? ""}
+            value={benchmarkChallenge?.id ?? ""}
             onChange={(e) => {
               const picked = BENCHMARK.find((b) => b.id === e.target.value);
               if (picked) setChallenge(picked.challenge);
@@ -143,12 +81,14 @@ export function LiveArena() {
             {BENCHMARK_CATEGORIES.map((category) => (
               <optgroup key={category} label={category}>
                 {BENCHMARK.filter((b) => b.category === category).map((b) => (
-                  <option key={b.id} value={b.id}>{b.title}</option>
+                  <option key={b.id} value={b.id}>
+                    {b.title}
+                  </option>
                 ))}
               </optgroup>
             ))}
           </select>
-          {benchmarkOf(challenge) ? (
+          {benchmarkChallenge ? (
             <span className="font-mono text-xs text-amber-400">Counts towards the benchmark</span>
           ) : (
             challenge.trim() && <span className="font-mono text-xs text-stone-500">A free battle (not in the benchmark)</span>
@@ -157,13 +97,13 @@ export function LiveArena() {
         <div className="flex flex-wrap items-center gap-3">
           <input
             type="password"
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
+            value={arenaKey}
+            onChange={(e) => setArenaKey(e.target.value)}
             placeholder="Arena key"
             className="rounded-lg border border-stone-700 bg-stone-900 px-3 py-2 font-mono text-sm text-stone-100 focus:border-amber-500 focus:outline-none"
           />
           <button
-            disabled={fighting || !challenge.trim()}
+            disabled={fighting || benchmarkRunning || !challenge.trim()}
             className="rounded-lg bg-amber-500 px-5 py-2 font-semibold text-stone-950 disabled:opacity-40"
           >
             {fighting ? "Battle in progress…" : "Release the gladiators"}
@@ -177,6 +117,14 @@ export function LiveArena() {
         </div>
         {error && <p className="font-mono text-sm text-red-400">{error}</p>}
       </form>
+
+      <BenchmarkRunner
+        arenaKey={arenaKey}
+        busy={fighting}
+        runBattle={runBattle}
+        onRunningChange={setBenchmarkRunning}
+        onError={setError}
+      />
 
       <ArenaView state={state} mode="live" />
 

@@ -1,31 +1,30 @@
 import { get, list, put } from "@vercel/blob";
 import { cacheLife, cacheTag } from "next/cache";
+import { benchmarkOf } from "./benchmark";
 import { computeBenchmark, computeLeaderboard } from "./leaderboard";
 import type { Replay } from "./types";
 
 // Replays live in Vercel Blob:
-//   replays/<id>.json   one file per battle (every event, token by token)
-//   replays/index.json  a small list the gallery reads, newest first
-//
-// Why an index instead of calling list() for every visitor? On Hobby, uploads and
-// list() calls are "advanced operations", and only 2,000 are included each month.
-// This design costs 3 per battle (save, check, update the index) and 0 per page view.
+//   replays/<id>.json   one file per battle, with every event
+//   replays/index.json  a short summary of each battle, newest first
+// Pages read the index rather than calling list(), because list() and uploads are
+// "advanced operations" with a monthly allowance on the Hobby plan.
 
 export type ReplaySummary = { id: string; challenge: string; winner?: string; createdAt: string; rematchOf?: string };
 
+/** Revalidate this tag to refresh every page that reads replays. */
 export const REPLAYS_TAG = "replays";
-const INDEX = "replays/index.json";
+const INDEX_PATH = "replays/index.json";
+const MAX_INDEXED = 200;
 
-// Read straight from storage, skipping the CDN. An early version read through the
-// CDN, got a cached copy of the index that was minutes old, and saved over it,
-// quietly dropping a battle from the gallery.
+/** Reads straight from storage, bypassing the CDN, so the index is never a stale copy. */
 async function readJson<T>(pathname: string): Promise<T | null> {
   try {
     const res = await get(pathname, { access: "public", useCache: false });
     if (!res || res.statusCode !== 200) return null;
     return (await new Response(res.stream).json()) as T;
   } catch {
-    return null; // not found yet, or Blob not connected (e.g. your first build)
+    return null; // not saved yet, or Blob isn't connected
   }
 }
 
@@ -44,50 +43,64 @@ const summarise = ({ id, challenge, winner, createdAt, rematchOf }: Replay): Rep
   challenge,
   winner,
   createdAt,
-  ...(rematchOf ? { rematchOf } : {}),
+  ...(rematchOf && { rematchOf }),
 });
 
+/** Saves a replay and adds it to the index, restoring any saved replay the index is missing. */
 export async function saveReplay(replay: Replay) {
   await writeJson(`replays/${replay.id}.json`, replay);
 
-  const index = (await readJson<ReplaySummary[]>(INDEX)) ?? [];
+  const index = (await readJson<ReplaySummary[]>(INDEX_PATH)) ?? [];
   const summaries = [summarise(replay), ...index.filter((r) => r.id !== replay.id)];
-
-  // Self-repair: add back any saved battle the index is missing.
-  const known = new Set(summaries.map((r) => r.id));
-  const { blobs } = await list({ prefix: "replays/", limit: 1000 });
-  for (const blob of blobs) {
-    const id = blob.pathname.replace(/^replays\/|\.json$/g, "");
-    if (blob.pathname === INDEX || known.has(id)) continue;
-    const missing = await readJson<Replay>(blob.pathname);
-    if (missing) summaries.push(summarise(missing));
-  }
+  summaries.push(...(await missingFromIndex(new Set(summaries.map((r) => r.id)))));
 
   summaries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  await writeJson(INDEX, summaries.slice(0, 200));
+  await writeJson(INDEX_PATH, summaries.slice(0, MAX_INDEXED));
 }
+
+async function missingFromIndex(known: Set<string>): Promise<ReplaySummary[]> {
+  const { blobs } = await list({ prefix: "replays/", limit: 1000 });
+  const missing = blobs.filter((blob) => blob.pathname !== INDEX_PATH && !known.has(replayIdOf(blob.pathname)));
+  const replays = await Promise.all(missing.map((blob) => readJson<Replay>(blob.pathname)));
+  return replays.filter((r): r is Replay => r !== null).map(summarise);
+}
+
+const replayIdOf = (pathname: string) => pathname.replace(/^replays\/|\.json$/g, "");
 
 export async function listReplays(): Promise<ReplaySummary[]> {
   "use cache";
-  cacheTag(REPLAYS_TAG); // refreshed straight after each battle
-  cacheLife("days"); // otherwise, no Blob reads at all for most visitors
-  return (await readJson<ReplaySummary[]>(INDEX)) ?? [];
+  cacheTag(REPLAYS_TAG);
+  cacheLife("days");
+  return (await readJson<ReplaySummary[]>(INDEX_PATH)) ?? [];
 }
 
 export async function getReplay(id: string): Promise<Replay | null> {
   "use cache";
-  cacheLife("max"); // a replay never changes once it's saved
+  cacheLife("max"); // a replay never changes once saved
   if (!/^[\w-]+$/.test(id)) return null;
   return readJson<Replay>(`replays/${id}.json`);
 }
 
-// The leaderboard reads every saved battle. Each replay is cached for good once read,
-// and the result is refreshed straight after each battle, like the gallery.
+async function getReplays(summaries: ReplaySummary[]): Promise<Replay[]> {
+  const replays = await Promise.all(summaries.map((r) => getReplay(r.id)));
+  return replays.filter((r): r is Replay => r !== null);
+}
+
 export async function getLeaderboard() {
   "use cache";
   cacheTag(REPLAYS_TAG);
   cacheLife("days");
-  const summaries = await listReplays();
-  const replays = (await Promise.all(summaries.map((r) => getReplay(r.id)))).filter((r): r is Replay => r !== null);
-  return { all: computeLeaderboard(replays), tested: computeLeaderboard(replays, "tested"), benchmark: computeBenchmark(replays) };
+  const replays = await getReplays(await listReplays());
+  return {
+    all: computeLeaderboard(replays),
+    tested: computeLeaderboard(replays, "tested"),
+    benchmark: computeBenchmark(replays),
+  };
+}
+
+/** Runs per benchmark challenge, read fresh: the benchmark runner picks the next battle from this. */
+export async function getBenchmarkRuns() {
+  const index = (await readJson<ReplaySummary[]>(INDEX_PATH)) ?? [];
+  const candidates = index.filter((r) => benchmarkOf(r.challenge) && !r.rematchOf);
+  return computeBenchmark(await getReplays(candidates)).runs.map(({ id, title, challenge, runs }) => ({ id, title, challenge, runs }));
 }

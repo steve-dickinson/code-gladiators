@@ -2,10 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { errorMessage } from "@/lib/utils";
 
-// Starts a rematch of a saved battle: same challenge, and half the gladiators get the
-// judge's feedback from last time (see src/lib/rematch.ts). Needs the arena key, like
-// any live battle, then hands over to the arena page to watch it.
+/** Starts a rematch of a saved battle (see src/lib/rematch.ts), then opens it in the arena. */
 export function RematchButton({ replayId }: { replayId: string }) {
   const [open, setOpen] = useState(false);
   const [key, setKey] = useState("");
@@ -25,9 +24,9 @@ export function RematchButton({ replayId }: { replayId: string }) {
       });
       const body = (await res.json().catch(() => ({}))) as { runId?: string; error?: string };
       if (!res.ok || !body.runId) throw new Error(body.error ?? `The arena said no (${res.status})`);
-      router.push(`/?run=${body.runId}`); // the arena page picks the battle up from here
+      router.push(`/?run=${body.runId}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
       setBusy(false);
     }
   }

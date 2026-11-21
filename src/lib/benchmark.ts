@@ -1,19 +1,7 @@
-// The benchmark: a fixed set of challenges, each run several times, so every model faces
-// the same tasks and one lucky (or unlucky) battle can't decide anything.
-//
-// How the set is built:
-// - Four kinds of entry, three challenges each: games (keyboard and mouse, real-time
-//   logic), tools (answers you can check), toys and visuals (drawing, animation), and
-//   two creative twists carried over from early battles, so old and new results compare.
-// - Every challenge says what "working" means in checkable terms (2 + 3 x 4 = 14, the
-//   snake grows by one), so the AI tester and the judge are checking the same things.
-// - Tools and toys avoid words like "score", "level" and "lives": the browser test reads
-//   those as "this is a game" and expects it to react to the arrow keys.
-// - Each one fits in the arena's 280-character limit, and needs no images or libraries.
-//
-// A battle counts towards the benchmark only if its challenge is one of these, word for
-// word (spacing and capitals aside), it isn't a rematch, and it was judged blind (see
-// countsForBenchmark in leaderboard.ts).
+// A fixed set of challenges, each run several times, so every model faces the same tasks.
+// Each challenge states what "working" means in checkable terms, so the testers and the
+// judge check the same things. Tools and toys avoid game words ("score", "level"), which
+// would make the browser test expect them to react to the arrow keys.
 
 export type BenchmarkCategory = "Games" | "Tools" | "Toys" | "Twists";
 
@@ -21,10 +9,25 @@ export type BenchmarkChallenge = {
   id: string;
   category: BenchmarkCategory;
   title: string;
-  challenge: string; // exactly what the gladiators are given
+  /** Exactly what the gladiators are given. */
+  challenge: string;
 };
 
-export const BENCHMARK_RUNS = 3; // how many times each challenge should be run
+/** How many times each challenge is run. */
+export const BENCHMARK_RUNS = 3;
+
+/** Battles before this were played under different rules and don't count. */
+export const BENCHMARK_FROM = "2026-11-21T10:50:00Z";
+
+/** Battles spoiled by the arena rather than a model. They're re-run, and kept out of the results. */
+export const BENCHMARK_VOID: Record<string, string> = {
+  "2026-11-21-5773156b": "HTML extraction bug discarded a complete entry",
+  "2026-11-21-863cff6f": "HTML extraction bug discarded a complete entry",
+  "2026-11-21-847977ad": "HTML extraction bug discarded a complete entry",
+  "2026-11-21-091a8fa0": "HTML extraction bug discarded a complete entry",
+  "2026-11-21-e23e2f33": "HTML extraction bug discarded a complete entry",
+  "2026-11-21-2aa047c0": "an extra, fourth run of the unit converter",
+};
 
 export const BENCHMARK: BenchmarkChallenge[] = [
   {
@@ -113,8 +116,8 @@ export const BENCHMARK: BenchmarkChallenge[] = [
 
 export const BENCHMARK_CATEGORIES: BenchmarkCategory[] = ["Games", "Tools", "Toys", "Twists"];
 
-const normalise = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
-const byText = new Map(BENCHMARK.map((b) => [normalise(b.challenge), b]));
+const normalise = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
+const byChallenge = new Map(BENCHMARK.map((b) => [normalise(b.challenge), b]));
 
-// Which benchmark challenge a battle was, if any.
-export const benchmarkOf = (challenge?: string) => (challenge ? byText.get(normalise(challenge)) : undefined);
+/** The benchmark challenge with this exact wording (ignoring spacing and case), if any. */
+export const benchmarkOf = (challenge?: string) => (challenge ? byChallenge.get(normalise(challenge)) : undefined);

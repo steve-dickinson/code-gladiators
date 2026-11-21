@@ -1,17 +1,20 @@
 import type { BattleData, BattleEvent, GladiatorStatus, TestReport } from "./types";
 
-// One reducer drives both the live arena and the replay player:
-// feed it the same events and you get the same fight on screen.
+// One reducer drives both the live arena and the replay player: the same events give
+// the same battle on screen.
 
 export type GladiatorView = {
   id: string;
   name: string;
   model: string;
   colour: string;
-  versions: string[]; // the code of each round: first draft, then each fix
-  round: number; // which version is on screen (1-based)
-  code: string; // = versions[round - 1]
-  tests: TestReport[]; // what the browser saw, round by round
+  /** The code of each round: the first draft, then each fix. */
+  versions: string[];
+  /** The version on screen, starting at 1. */
+  round: number;
+  /** The code of the version on screen. */
+  code: string;
+  tests: TestReport[];
   status: GladiatorStatus;
   previewUrl?: string;
   error?: string;
@@ -45,33 +48,26 @@ export function battleReducer(state: BattleState, action: BattleAction): BattleS
         challenge: action.data.challenge,
         maxRounds: action.data.maxRounds,
         rematch: action.data.rematch,
-        gladiators: action.data.gladiators.map((g) => ({
-          ...g,
-          versions: [""],
-          round: 1,
-          code: "",
-          tests: [],
-          status: "waiting",
-        })),
+        gladiators: action.data.gladiators.map((g) => ({ ...g, versions: [""], round: 1, code: "", tests: [], status: "waiting" })),
       };
     case "delta":
       // Code always streams into the newest version.
-      return update(state, action.data.gladiator, (g) => {
+      return updateGladiator(state, action.data.gladiator, (g) => {
         const versions = g.versions.with(-1, g.versions.at(-1) + action.data.text);
         return { versions, round: versions.length };
       });
     case "status": {
       const { gladiator, round, ...rest } = action.data;
-      return update(state, gladiator, (g) => {
-        if (!round) return rest; // replays from before Stage 6 have no rounds
-        // A new round starts a new, empty version; a lower round puts an older one back on screen.
+      return updateGladiator(state, gladiator, (g) => {
+        if (!round) return rest; // older replays have no rounds
+        // A new round starts an empty version; an earlier round puts that version back on screen.
         const versions = round > g.versions.length ? [...g.versions, ...Array(round - g.versions.length).fill("")] : g.versions;
         return { ...rest, versions, round };
       });
     }
     case "test": {
       const { gladiator, ...report } = action.data;
-      return update(state, gladiator, (g) => ({ tests: [...g.tests, report] }));
+      return updateGladiator(state, gladiator, (g) => ({ tests: [...g.tests, report] }));
     }
     case "verdict":
       return { ...state, verdict: action.data };
@@ -82,7 +78,7 @@ export function battleReducer(state: BattleState, action: BattleAction): BattleS
   }
 }
 
-function update(state: BattleState, id: string, patch: (g: GladiatorView) => Partial<GladiatorView>): BattleState {
+function updateGladiator(state: BattleState, id: string, patch: (g: GladiatorView) => Partial<GladiatorView>): BattleState {
   return {
     ...state,
     gladiators: state.gladiators.map((g) => {

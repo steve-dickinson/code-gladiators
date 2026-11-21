@@ -5,7 +5,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Code Gladiators",
-  description: "Four AI models race to build the same game, live, in isolated sandboxes. An AI judge picks the winner.",
+  description: "Four AI models race to build the same thing, live. Each entry is tested in a real browser, and an AI judge picks the winner.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

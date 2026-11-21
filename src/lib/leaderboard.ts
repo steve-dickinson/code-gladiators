@@ -1,88 +1,86 @@
-import { BENCHMARK, BENCHMARK_CATEGORIES, benchmarkOf, type BenchmarkCategory } from "./benchmark";
+import { BENCHMARK, BENCHMARK_CATEGORIES, BENCHMARK_FROM, BENCHMARK_VOID, benchmarkOf, type BenchmarkCategory } from "./benchmark";
+import { battleOf, hasEntries, statusesOf, testsOf, verdictOf } from "./replay-events";
 import type { BattleData, Replay } from "./types";
+import { mean, median, roundTo } from "./utils";
 
-// The leaderboard: every saved battle, boiled down to numbers per model. It reads the
-// same replays the gallery plays, so it costs nothing to run: no model calls at all.
-//
-// What counts, and what doesn't:
-// - A battle where no gladiator produced an entry is left out. In one battle every model
-//   call failed on an expired login and the judge still handed out zeros.
-// - In a rematch, the coached gladiators read feedback before writing, so their entries
-//   had help the others didn't. They're left out; the control group's entries count.
+// Per-model statistics, worked out from saved replays (no model calls). Battles where
+// no gladiator produced an entry are left out, and so are coached entries in rematches,
+// which had help the others didn't.
 
 export type ModelStats = {
   id: string;
   name: string;
   colour: string;
-  battles: number; // battles this model fought, as counted here
-  built: number; // ...in which it produced an entry
-  judged: number; // ...and the judge scored it
+  battles: number;
+  /** Battles in which it produced an entry. */
+  built: number;
+  /** Battles in which the judge scored it. */
+  judged: number;
   wins: number;
-  avgScore?: number; // out of 30
-  avgParts?: { creativity: number; polish: number; fidelity: number }; // each out of 10
-  avgPlace?: number; // 1 is best
-  tested: number; // entries the browser tested
-  firstTime: number; // ...that passed the first time
-  workingAtEnd: number; // ...whose final version passed
-  fixes: number; // fix rounds used, in total
-  aiTested: number; // final versions the AI tester used
-  aiBugs: number; // ...where it found at least one bug
-  medianSeconds?: number; // time from the start of the battle to a finished entry
-  medianCostUsd?: number; // model fees for one entry, fixes included
-  costUsd: number; // everything it spent
+  /** Out of 30. */
+  avgScore?: number;
+  /** Each out of 10. */
+  avgParts?: { creativity: number; polish: number; fidelity: number };
+  /** 1 is best. */
+  avgPlace?: number;
+  /** Entries the browser tested. */
+  tested: number;
+  /** Tested entries that passed first time. */
+  firstTime: number;
+  /** Tested entries whose final version passed. */
+  workingAtEnd: number;
+  /** Fix rounds used, in total. */
+  fixes: number;
+  /** Final versions the AI tester used. */
+  aiTested: number;
+  /** Final versions where the AI tester found a bug. */
+  aiBugs: number;
+  /** From the start of the battle to a finished entry. */
+  medianSeconds?: number;
+  /** Model fees for one entry, fixes included. */
+  medianCostUsd?: number;
+  costUsd: number;
 };
 
 export type Leaderboard = {
-  battles: number; // battles counted
-  voided: number; // battles left out because nobody produced an entry
-  coachedLeftOut: number; // coached rematch entries left out
-  judged: number; // counted battles with a verdict
-  blind: number; // ...judged blind
-  sawScreenshots: number; // ...where the judge saw screenshots
-  from?: string; // the first and last battle counted (ISO dates)
+  battles: number;
+  /** Battles left out because no gladiator produced an entry. */
+  voided: number;
+  coachedLeftOut: number;
+  judged: number;
+  blind: number;
+  sawScreenshots: number;
+  /** ISO dates of the first and last battle counted. */
+  from?: string;
   to?: string;
-  models: ModelStats[]; // most wins first, then the best average score
+  /** Most wins first, then the best average score. */
+  models: ModelStats[];
 };
 
-const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : undefined);
-const median = (xs: number[]) => {
-  if (!xs.length) return undefined;
-  const s = xs.toSorted((a, b) => a - b);
-  const mid = Math.floor(s.length / 2);
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-};
-const round = (n: number | undefined, dp = 1) => (n === undefined ? undefined : Math.round(n * 10 ** dp) / 10 ** dp);
+/** Which battles to count: all, those with browser tests, the benchmark, or one benchmark category. */
+export type LeaderboardScope = "all" | "tested" | "benchmark" | BenchmarkCategory;
 
-type Tally = Omit<ModelStats, "avgScore" | "avgParts" | "avgPlace" | "medianSeconds" | "medianCostUsd"> & {
-  scores: number[];
-  parts: { creativity: number; polish: number; fidelity: number }[];
+type Tally = Pick<ModelStats, "id" | "name" | "colour"> & {
+  counts: Omit<ModelStats, "id" | "name" | "colour" | "avgScore" | "avgParts" | "avgPlace" | "medianSeconds" | "medianCostUsd">;
+  scores: BattleData["verdict"]["scores"];
   places: number[];
   seconds: number[];
   costs: number[];
 };
 
-// only: "tested" counts just the battles where the browser tested the entries;
-// "benchmark" just the benchmark challenges (not rematches); a category, just its challenges.
-export function computeLeaderboard(replays: Replay[], only: "all" | "tested" | "benchmark" | BenchmarkCategory = "all"): Leaderboard {
-  const tallies = new Map<string, Tally>();
+export function computeLeaderboard(replays: Replay[], scope: LeaderboardScope = "all"): Leaderboard {
   const board: Leaderboard = { battles: 0, voided: 0, coachedLeftOut: 0, judged: 0, blind: 0, sawScreenshots: 0, models: [] };
+  const tallies = new Map<string, Tally>();
   const dates: string[] = [];
 
   for (const replay of replays) {
-    const battle = replay.events.find((e) => e.type === "battle")?.data as BattleData["battle"] | undefined;
-    if (!battle) continue;
-    const statuses = replay.events.flatMap((e) => (e.type === "status" ? [e.data] : []));
-    const tests = replay.events.flatMap((e) => (e.type === "test" ? [e.data] : []));
-    if (only === "tested" && tests.length === 0) continue;
-    if (only !== "all" && only !== "tested") {
-      const b = benchmarkOf(replay.challenge);
-      if (!b || !countsForBenchmark(replay, battle) || (only !== "benchmark" && b.category !== only)) continue;
-    }
-    if (!statuses.some((s) => s.status === "live")) {
+    const battle = battleOf(replay);
+    if (!battle || !inScope(replay, battle, scope)) continue;
+    if (!hasEntries(replay)) {
       board.voided++;
       continue;
     }
-    const verdict = replay.events.findLast((e) => e.type === "verdict")?.data as BattleData["verdict"] | undefined;
+    const verdict = verdictOf(replay);
     board.battles++;
     dates.push(replay.createdAt);
     if (verdict) {
@@ -90,103 +88,127 @@ export function computeLeaderboard(replays: Replay[], only: "all" | "tested" | "
       if (verdict.blind) board.blind++;
       if (verdict.sawScreenshots) board.sawScreenshots++;
     }
-    const coached = new Set(battle.rematch?.coached ?? []);
 
-    for (const g of battle.gladiators) {
-      if (coached.has(g.id)) {
+    for (const gladiator of battle.gladiators) {
+      if (battle.rematch?.coached.includes(gladiator.id)) {
         board.coachedLeftOut++;
         continue;
       }
-      let t = tallies.get(g.id);
-      if (!t) {
-        t = {
-          id: g.id, name: g.name, colour: g.colour,
-          battles: 0, built: 0, judged: 0, wins: 0, tested: 0, firstTime: 0, workingAtEnd: 0, fixes: 0, aiTested: 0, aiBugs: 0, costUsd: 0,
-          scores: [], parts: [], places: [], seconds: [], costs: [],
-        };
-        tallies.set(g.id, t);
-      }
-      t.battles++;
-
-      // The last word on this entry: "live" (it produced one) or "failed".
-      const final = statuses.findLast((s) => s.gladiator === g.id && (s.status === "live" || s.status === "failed"));
-      if (final?.status === "live") t.built++;
-      if (final?.ms !== undefined && final.status === "live") t.seconds.push(final.ms / 1000);
-      if (final?.costUsd !== undefined) {
-        t.costUsd += final.costUsd;
-        if (final.status === "live") t.costs.push(final.costUsd);
-      }
-
-      const mine = tests.filter((x) => x.gladiator === g.id).toSorted((a, b) => a.round - b.round);
-      if (mine.length) {
-        t.tested++;
-        if (mine[0].round === 1 && mine[0].passed) t.firstTime++;
-        const last = mine.at(-1)!;
-        if (last.passed) t.workingAtEnd++;
-        t.fixes += last.round - 1;
-        if (last.ai) {
-          t.aiTested++;
-          if (last.ai.bugs.length) t.aiBugs++;
-        }
-      }
-
-      const ranked = verdict?.scores ?? [];
-      const place = ranked.findIndex((s) => s.gladiator === g.id);
-      if (place >= 0) {
-        const s = ranked[place];
-        t.judged++;
-        t.scores.push(s.total);
-        t.parts.push({ creativity: s.creativity, polish: s.polish, fidelity: s.fidelity });
-        t.places.push(place + 1);
-        if (verdict?.winner === g.id) t.wins++;
-      }
+      const tally = tallies.get(gladiator.id) ?? newTally(gladiator);
+      tallies.set(gladiator.id, tally);
+      addEntry(tally, replay, verdict);
     }
   }
 
-  board.models = [...tallies.values()]
-    .map(({ scores, parts, places, seconds, costs, ...t }) => ({
-      ...t,
-      costUsd: round(t.costUsd, 4) ?? 0,
-      avgScore: round(mean(scores)),
-      avgParts: parts.length
-        ? {
-            creativity: round(mean(parts.map((p) => p.creativity)))!,
-            polish: round(mean(parts.map((p) => p.polish)))!,
-            fidelity: round(mean(parts.map((p) => p.fidelity)))!,
-          }
-        : undefined,
-      avgPlace: round(mean(places)),
-      medianSeconds: round(median(seconds), 0),
-      medianCostUsd: round(median(costs), 4),
-    }))
-    .sort((a, b) => b.wins - a.wins || (b.avgScore ?? 0) - (a.avgScore ?? 0));
+  board.models = [...tallies.values()].map(toStats).sort((a, b) => b.wins - a.wins || (b.avgScore ?? 0) - (a.avgScore ?? 0));
   dates.sort();
   board.from = dates[0];
   board.to = dates.at(-1);
   return board;
 }
 
-// A benchmark run must be played under the same rules as every other: not a rematch
-// (half of those had help), and judged blind. Older battles with the same challenge were
-// judged by a judge that could see model names, before the browser tests existed, so
-// they stay in the "all battles" table but don't count here.
-function countsForBenchmark(replay: Replay, battle: BattleData["battle"]) {
-  const verdict = replay.events.findLast((e) => e.type === "verdict")?.data as BattleData["verdict"] | undefined;
-  return !battle.rematch && Boolean(verdict?.blind);
+/** The benchmark: overall standings, standings per category, and how many runs each challenge has. */
+export function computeBenchmark(replays: Replay[]) {
+  return {
+    overall: computeLeaderboard(replays, "benchmark"),
+    byCategory: BENCHMARK_CATEGORIES.map((category) => ({ category, board: computeLeaderboard(replays, category) })),
+    runs: BENCHMARK.map((challenge) => ({
+      ...challenge,
+      runs: replays.filter((r) => benchmarkOf(r.challenge)?.id === challenge.id && countsForBenchmark(r) && hasEntries(r)).length,
+    })),
+  };
 }
 
-// The benchmark at a glance: the overall table, each model's average score per kind of
-// challenge, and how many times each challenge has been run so far.
-export function computeBenchmark(replays: Replay[]) {
-  const overall = computeLeaderboard(replays, "benchmark");
-  const byCategory = BENCHMARK_CATEGORIES.map((category) => ({ category, board: computeLeaderboard(replays, category) }));
-  const runs = BENCHMARK.map((b) => ({
-    ...b,
-    runs: replays.filter((r) => {
-      const battle = r.events.find((e) => e.type === "battle")?.data as BattleData["battle"] | undefined;
-      const built = r.events.some((e) => e.type === "status" && e.data.status === "live");
-      return benchmarkOf(r.challenge)?.id === b.id && battle !== undefined && countsForBenchmark(r, battle) && built;
-    }).length,
-  }));
-  return { overall, byCategory, runs };
+/** A benchmark run counts if it isn't a rematch, was judged blind, and was run under the current rules. */
+export function countsForBenchmark(replay: Replay): boolean {
+  return (
+    !battleOf(replay)?.rematch &&
+    Boolean(verdictOf(replay)?.blind) &&
+    replay.createdAt >= BENCHMARK_FROM &&
+    !(replay.id in BENCHMARK_VOID)
+  );
+}
+
+function inScope(replay: Replay, battle: BattleData["battle"], scope: LeaderboardScope): boolean {
+  if (scope === "all") return true;
+  if (scope === "tested") return testsOf(replay).length > 0;
+  const challenge = benchmarkOf(battle.challenge);
+  if (!challenge || !countsForBenchmark(replay)) return false;
+  return scope === "benchmark" || challenge.category === scope;
+}
+
+function newTally({ id, name, colour }: BattleData["battle"]["gladiators"][number]): Tally {
+  return {
+    id,
+    name,
+    colour,
+    counts: { battles: 0, built: 0, judged: 0, wins: 0, tested: 0, firstTime: 0, workingAtEnd: 0, fixes: 0, aiTested: 0, aiBugs: 0, costUsd: 0 },
+    scores: [],
+    places: [],
+    seconds: [],
+    costs: [],
+  };
+}
+
+function addEntry(tally: Tally, replay: Replay, verdict?: BattleData["verdict"]) {
+  const { counts } = tally;
+  counts.battles++;
+
+  const outcome = statusesOf(replay).findLast((s) => s.gladiator === tally.id && (s.status === "live" || s.status === "failed"));
+  if (outcome?.status === "live") {
+    counts.built++;
+    if (outcome.ms !== undefined) tally.seconds.push(outcome.ms / 1000);
+    if (outcome.costUsd !== undefined) tally.costs.push(outcome.costUsd);
+  }
+  counts.costUsd += outcome?.costUsd ?? 0;
+
+  const tests = testsOf(replay, tally.id).toSorted((a, b) => a.round - b.round);
+  const finalTest = tests.at(-1);
+  if (finalTest) {
+    counts.tested++;
+    if (tests[0].round === 1 && tests[0].passed) counts.firstTime++;
+    if (finalTest.passed) counts.workingAtEnd++;
+    counts.fixes += finalTest.round - 1;
+    if (finalTest.ai) {
+      counts.aiTested++;
+      if (finalTest.ai.bugs.length) counts.aiBugs++;
+    }
+  }
+
+  const place = verdict?.scores.findIndex((s) => s.gladiator === tally.id) ?? -1;
+  if (verdict && place >= 0) {
+    counts.judged++;
+    tally.scores.push(verdict.scores[place]);
+    tally.places.push(place + 1);
+    if (verdict.winner === tally.id) counts.wins++;
+  }
+}
+
+function toStats({ id, name, colour, counts, scores, places, seconds, costs }: Tally): ModelStats {
+  const avg = (values: number[], decimals = 1) => {
+    const value = mean(values);
+    return value === undefined ? undefined : roundTo(value, decimals);
+  };
+  const med = (values: number[], decimals: number) => {
+    const value = median(values);
+    return value === undefined ? undefined : roundTo(value, decimals);
+  };
+  return {
+    id,
+    name,
+    colour,
+    ...counts,
+    costUsd: roundTo(counts.costUsd, 4),
+    avgScore: avg(scores.map((s) => s.total)),
+    avgParts: scores.length
+      ? {
+          creativity: roundTo(mean(scores.map((s) => s.creativity))!),
+          polish: roundTo(mean(scores.map((s) => s.polish))!),
+          fidelity: roundTo(mean(scores.map((s) => s.fidelity))!),
+        }
+      : undefined,
+    avgPlace: avg(places),
+    medianSeconds: med(seconds, 0),
+    medianCostUsd: med(costs, 4),
+  };
 }

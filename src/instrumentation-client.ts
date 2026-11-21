@@ -1,6 +1,6 @@
 import { initBotId } from "botid/client/core";
 
-// Tell BotID which routes to protect. The server checks with checkBotId().
+// Routes BotID protects; the route itself calls checkBotId().
 initBotId({
   protect: [{ path: "/api/battle", method: "POST" }],
 });

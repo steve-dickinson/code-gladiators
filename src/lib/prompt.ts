@@ -11,31 +11,38 @@ Rules:
 - Make it delightful: a judge scores creativity, polish and how faithfully you followed the challenge.
 - Keep it under 400 lines. Finish the file: an unfinished file scores zero.`;
 
-// In a rematch, a coached gladiator also reads its feedback from last time.
-export function gladiatorPrompt(challenge: string, feedback?: string) {
+/** The challenge, plus last time's feedback for a coached gladiator in a rematch. */
+export function gladiatorPrompt(challenge: string, feedback?: string): string {
   return feedback ? `Challenge: ${challenge}\n\n${feedback}` : `Challenge: ${challenge}`;
 }
 
-// After a failed playtest, the gladiator sees exactly what the browser saw.
-export function fixPrompt(report: TestReport) {
+/** Everything the testers found, for the gladiator to fix. */
+export function fixPrompt(report: TestReport): string {
   const problems = [
-    ...report.errors.map((e) => `- ${e}`),
-    ...(report.blank ? ["- The screen stayed empty: nothing was drawn and no text appeared."] : []),
-    ...(report.ai?.bugs ?? []).map((b) => `- An AI tester found: ${b}`),
-  ].join("\n");
-  const used = report.ai?.moves.length ? `\nWhat the AI tester did:\n${report.ai.moves.map((m) => `- ${m}`).join("\n")}\n` : "";
+    ...report.errors,
+    ...(report.blank ? ["The screen stayed empty: nothing was drawn and no text appeared."] : []),
+    ...(report.ai?.bugs ?? []).map((bug) => `An AI tester found: ${bug}`),
+  ];
+  const moves = report.ai?.moves.length ? `\nWhat the AI tester did:\n${bulleted(report.ai.moves)}\n` : "";
   return `A headless browser just loaded your page, pressed any Start button, pressed keys and moved the mouse. Then an AI tester used it for what the challenge asked. They found these problems:
-${problems}
-${used}
+${bulleted(problems)}
+${moves}
 Fix them. Keep everything that already works. Output the complete corrected HTML file, starting with <!DOCTYPE html>, and nothing else.`;
 }
 
-// Models sometimes wrap their answer in ``` fences or add chatter. Pull out the HTML.
-export function extractHtml(raw: string): string {
-  const fenced = raw.match(/```(?:html)?\s*([\s\S]*?)(?:```|$)/i);
-  const body = fenced ? fenced[1] : raw;
-  const start = body.search(/<!doctype html|<html/i);
-  const html = start >= 0 ? body.slice(start) : body;
-  const end = html.toLowerCase().lastIndexOf("</html>");
-  return (end >= 0 ? html.slice(0, end + 7) : html).trim();
+const bulleted = (lines: string[]) => lines.map((line) => `- ${line}`).join("\n");
+
+/**
+ * Pulls the HTML document out of a model's reply, which may wrap it in a code fence,
+ * add chat around it, or leave a stray closing fence after a bare document.
+ */
+export function extractHtml(reply: string): string {
+  const start = reply.search(/<!doctype html|<html[\s>]/i);
+  if (start >= 0) {
+    const end = reply.toLowerCase().lastIndexOf("</html>");
+    const html = end > start ? reply.slice(start, end + "</html>".length) : reply.slice(start).replace(/`{3,}\s*$/, "");
+    return html.trim();
+  }
+  const fenced = reply.match(/```(?:html)?\s*([\s\S]*?)(?:```|$)/i);
+  return (fenced?.[1] ?? reply).trim();
 }

@@ -1,14 +1,22 @@
 {
   "name": "code-gladiators",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
+  "license": "MIT",
+  "description": "Four AI models build the same thing, live. Each entry is tested in a real browser, and an AI judge picks the winner.",
+  "engines": {
+    "node": ">=20.9"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check-models": "node --env-file=.env.local scripts/check-models.mts",
-    "typecheck": "next typegen && tsc --noEmit"
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "check-models": "node --env-file=.env.local scripts/check-models.mts"
   },
   "dependencies": {
     "@agent-browser/sandbox": "^0.43.0",
@@ -31,6 +39,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.7"
   }
 }

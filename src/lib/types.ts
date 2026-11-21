@@ -1,4 +1,4 @@
-// "deploying" only appears in replays recorded before Stage 6.
+/** "deploying" only appears in replays recorded before battles were tested. */
 export type GladiatorStatus = "waiting" | "writing" | "testing" | "fixing" | "deploying" | "live" | "failed";
 
 export type Score = {
@@ -10,40 +10,57 @@ export type Score = {
   roast: string;
 };
 
-// What a headless browser in the sandbox saw when it played one version of a game.
+export type AiTestResult = {
+  /** What the tester did, in order. */
+  moves: string[];
+  bugs: string[];
+  summary: string;
+  costUsd: number;
+  /** What the tester decided the entry is: a game, a tool, a toy, a visual… */
+  kind?: string;
+  /** The model that did the testing: the first choice, or a fallback. */
+  model?: string;
+};
+
+/** What happened when one version of an entry was tested in a real browser. */
 export type TestReport = {
   round: number;
-  passed: boolean; // no errors and something on screen
-  errors: string[]; // page errors and console.error messages
-  blank: boolean; // nothing drawn and no text
-  responsive: boolean; // the page changed after clicks, keys and mouse movement
+  /** No errors, something on screen, and no bugs found by the AI tester. */
+  passed: boolean;
+  /** Uncaught exceptions, console errors and problems the browser test detected. */
+  errors: string[];
+  /** Nothing drawn and no text. */
+  blank: boolean;
+  /** The page changed while the browser clicked, typed and pressed keys. */
+  responsive: boolean;
   ms: number;
-  screenshot?: string; // the page after being played, as a JPEG data URL: what the judge sees
-  // What the AI tester did and found (absent if it didn't get to test).
-  // kind is what it decided the entry is: a game, a tool, a toy, a visual…
-  ai?: { moves: string[]; bugs: string[]; summary: string; costUsd: number; kind?: string };
-  // Why the AI tester didn't report, when it tried and couldn't finish. Recorded so a
-  // replay can tell "the tester found nothing wrong" apart from "the tester never ran".
+  /** The page after testing, as a JPEG data URL. */
+  screenshot?: string;
+  ai?: AiTestResult;
+  /** Why the AI tester couldn't finish, so a replay can tell "no bugs" from "didn't run". */
   aiError?: string;
-  // The test browser drew too few frames a second to judge the controls fairly.
+  /** The browser drew too few frames a second to judge the controls fairly. */
   slowBrowser?: boolean;
 };
 
-// Every event the battle streams. The same events are recorded to Blob,
-// so a replay is just these events played back on a timer.
+export type RematchPlan = {
+  /** The replay id of the battle being rematched. */
+  of: string;
+  /** Gladiators shown their feedback; the rest are the control group. */
+  coached: string[];
+  previous: Record<string, { total: number; rank: number }>;
+  /** Exactly what each coached gladiator was told. */
+  feedback: Record<string, string>;
+};
+
+/** Every event a battle streams. The same events are saved, so a replay is just these played back. */
 export type BattleData = {
   battle: {
     id: string;
     challenge: string;
     maxRounds?: number;
     gladiators: { id: string; name: string; model: string; colour: string }[];
-    // Present when this battle is a rematch: see src/lib/rematch.ts.
-    rematch?: {
-      of: string; // the replay id of the battle being rematched
-      coached: string[]; // gladiators who were shown their feedback; the rest are the control group
-      previous: Record<string, { total: number; rank: number }>; // last time's scores
-      feedback: Record<string, string>; // exactly what each coached gladiator was told
-    };
+    rematch?: RematchPlan;
   };
   delta: { gladiator: string; text: string };
   status: {
@@ -62,23 +79,22 @@ export type BattleData = {
     headline: string;
     scores: Score[];
     sawScreenshots?: boolean;
-    // The judge saw the entries as "Entry A" to "Entry D", in a shuffled order, with no
-    // model names. Verdicts from before blind judging don't have this.
+    /** The judge saw anonymous, shuffled entries. Absent on older verdicts. */
     blind?: boolean;
   };
   replay: { id: string };
   done: { ok: boolean };
 };
 
-// One battle event, e.g. { type: "delta", data: { gladiator: "qwen", text: "<div>" } }
+/** One event, e.g. `{ type: "delta", data: { gladiator: "qwen", text: "<div>" } }`. */
 export type BattleEvent = {
   [K in keyof BattleData]: { type: K; data: BattleData[K] };
 }[keyof BattleData];
 
-// A recorded event also stores when it happened (ms after the battle started).
+/** A saved event, with when it happened in ms after the battle started. */
 export type RecordedEvent = BattleEvent & { t: number };
 
-// While a battle runs, steps stamp events with the wall-clock time instead.
+/** An event while a battle runs, stamped with wall-clock time. */
 export type StampedEvent = BattleEvent & { at: number };
 
 export type Replay = {
