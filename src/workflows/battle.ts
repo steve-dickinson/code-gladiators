@@ -58,7 +58,7 @@ export async function battleWorkflow({ battleId, challenge, startedAt }: BattleI
         const arena = await arenaPromise;
         if (!arena) break;
         try {
-          test = record(await testStep({ arena, gladiatorId: id, html, round })).report;
+          test = record(await testStep({ arena, gladiatorId: id, html, round, challenge })).report;
         } catch {
           test = undefined; // the browser broke, not the game: stop testing this one
           break;

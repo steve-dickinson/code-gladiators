@@ -115,13 +115,13 @@ export async function writeStep(input: {
 // Never retry a write: the viewer has already watched it stream, and it costs tokens.
 writeStep.maxRetries = 0;
 
-export async function testStep(input: { arena: ArenaHandle; gladiatorId: string; html: string; round: number }) {
+export async function testStep(input: { arena: ArenaHandle; gladiatorId: string; html: string; round: number; challenge: string }) {
   "use step";
   const { emit, events, release } = recorder();
   try {
     await emit("status", { gladiator: input.gladiatorId, status: "testing", round: input.round });
     await deploy(input.arena, input.gladiatorId, input.html);
-    const report = await playtest(input.arena, input.gladiatorId, input.round);
+    const report = await playtest(input.arena, input.gladiatorId, input.round, input.challenge);
     await emit("test", { gladiator: input.gladiatorId, ...report });
     return { report, events };
   } finally {

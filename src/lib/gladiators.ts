@@ -40,12 +40,22 @@ export const JUDGE_MODEL = "mistral/mistral-large-3";
 export const JUDGE_FALLBACKS = ["zai/glm-4.7"];
 // If the main judge is too slow, a smaller, faster model from the same lab steps in.
 export const QUICK_JUDGE_MODEL = "mistral/mistral-small";
+// Mistral Large 3 can't see images (checked with `npm run check-models`), so when there
+// are screenshots, a judge that can see them rules first, and Large 3 is the backup.
+export const VISION_JUDGE_MODEL = "mistral/mistral-small";
+
+// The AI tester: a cheap model that can see images. It uses each entry for a few moves
+// and reports anything that doesn't work. From a lab that isn't competing, too.
+// `npm run check-models -- --vision` lists the alternatives your account can call.
+export const PLAYTESTER_MODEL = "mistral/mistral-small";
 
 // Cost and time guard rails. Each battle is a Vercel Workflow, so the battle as a
 // whole has no time limit, but every step (one write, one test, one judging) must
 // finish inside a single function's 300 seconds on the free plan.
 export const LIMITS = {
   maxRounds: 3, // write, then up to two rounds of test-and-fix
+  playtesterActions: 6, // moves the AI playtester gets per game, per round
+  playtesterTimeoutMs: 25_000, // per playtester decision
   maxOutputTokens: 8000, // per gladiator per round: caps the worst-case spend
   maxChallengeLength: 280, // a tweet-sized challenge keeps prompts cheap
   writeTimeoutMs: 150_000, // abandon one round of writing after this

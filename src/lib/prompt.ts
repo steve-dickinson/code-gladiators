@@ -20,10 +20,12 @@ export function fixPrompt(report: TestReport) {
   const problems = [
     ...report.errors.map((e) => `- ${e}`),
     ...(report.blank ? ["- The screen stayed empty: nothing was drawn and no text appeared."] : []),
+    ...(report.ai?.bugs ?? []).map((b) => `- An AI tester found: ${b}`),
   ].join("\n");
-  return `A headless browser just played your file. It loaded the page, clicked, pressed Space, Enter and the arrow keys, typed, and moved the mouse. It found these problems:
+  const used = report.ai?.moves.length ? `\nWhat the AI tester did:\n${report.ai.moves.map((m) => `- ${m}`).join("\n")}\n` : "";
+  return `A headless browser just loaded your page, pressed any Start button, pressed keys and moved the mouse. Then an AI tester used it for what the challenge asked. They found these problems:
 ${problems}
-
+${used}
 Fix them. Keep everything that already works. Output the complete corrected HTML file, starting with <!DOCTYPE html>, and nothing else.`;
 }
 

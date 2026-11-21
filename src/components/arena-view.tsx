@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BattleState, GladiatorView } from "@/lib/battle-state";
 import { extractHtml } from "@/lib/prompt";
 
 const STATUS_LABEL: Record<GladiatorView["status"], string> = {
   waiting: "entering the arena",
   writing: "writing code",
-  testing: "browser is playing it",
+  testing: "being tested",
   fixing: "fixing its bugs",
   deploying: "deploying to sandbox",
   live: "live",
@@ -50,12 +50,33 @@ export function ArenaView({ state, mode }: { state: BattleState; mode: "live" | 
         <div className="rounded-xl border border-stone-700 bg-stone-900/60 p-5">
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-amber-400">The judge has spoken</p>
           <h2 className="mt-1 text-2xl font-semibold text-stone-50">{state.verdict.headline}</h2>
+          {state.verdict.sawScreenshots && (
+            <p className="mt-1 font-mono text-xs text-stone-500">Judged on the code and a screenshot of each entry after it was tested.</p>
+          )}
           <ol className="mt-4 space-y-3">
             {state.verdict.scores.map((s, i) => {
               const g = state.gladiators.find((x) => x.id === s.gladiator);
+              // The screenshot of the final version: what the judge saw.
+              const shot = state.verdict?.sawScreenshots
+                ? (g?.tests.findLast((t) => t.round === g.round) ?? g?.tests.at(-1))?.screenshot
+                : undefined;
               return (
                 <li key={s.gladiator} className="flex gap-4">
                   <span className="w-6 font-mono text-stone-500">{i + 1}.</span>
+                  {state.verdict?.sawScreenshots &&
+                    (shot ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- a data URL, nothing for next/image to optimise
+                      <img
+                        src={shot}
+                        alt={`What the judge saw of ${g?.name ?? s.gladiator}'s entry`}
+                        title="What the judge saw"
+                        className="hidden h-[72px] w-[115px] shrink-0 rounded border border-stone-700 object-cover sm:block"
+                      />
+                    ) : (
+                      <div className="hidden h-[72px] w-[115px] shrink-0 place-items-center rounded border border-dashed border-stone-700 font-mono text-[10px] text-stone-600 sm:grid">
+                        no picture
+                      </div>
+                    ))}
                   <div className="flex-1">
                     <div className="flex flex-wrap items-baseline gap-x-3">
                       <span className="font-semibold" style={{ color: g?.colour }}>{g?.name ?? s.gladiator}</span>
@@ -104,13 +125,11 @@ function GladiatorCard({ g, mode, score, winner }: { g: GladiatorView; mode: "li
         {score !== undefined && <span className="font-mono text-xl text-amber-300">{score}</span>}
       </header>
 
-      <div className="relative h-80 bg-black">
+      <div className="relative aspect-[8/5] bg-black">
         {showPreview && code ? (
-          <iframe
+          <GameFrame
             key={version}
             title={`${g.name} entry, version ${version}`}
-            sandbox="allow-scripts"
-            className="h-full w-full bg-white"
             {...(useSandbox ? { src: g.previewUrl } : { srcDoc: extractHtml(code) })}
           />
         ) : g.status === "failed" && !code ? (
@@ -125,13 +144,13 @@ function GladiatorCard({ g, mode, score, winner }: { g: GladiatorView; mode: "li
         )}
         {g.status === "testing" && (
           <div className="absolute inset-x-0 bottom-0 bg-stone-950/90 px-3 py-2 font-mono text-xs text-sky-300">
-            <span className="animate-pulse">●</span> A headless browser is clicking, pressing keys and watching for errors…
+            <span className="animate-pulse">●</span> A headless browser is clicking and pressing keys, then an AI tester uses it for what the challenge asked…
           </div>
         )}
         {g.status === "fixing" && lastTest && !lastTest.passed && (
           <div className="absolute inset-x-0 top-0 max-h-28 overflow-hidden bg-red-950/90 px-3 py-2 font-mono text-[11px] leading-4 text-red-200">
-            <p className="mb-1 uppercase tracking-wider text-red-400">The browser found</p>
-            {lastTest.errors.slice(0, 3).map((e) => (
+            <p className="mb-1 uppercase tracking-wider text-red-400">The testers found</p>
+            {[...lastTest.errors, ...(lastTest.ai?.bugs ?? [])].slice(0, 3).map((e) => (
               <p key={e} className="truncate">✗ {e}</p>
             ))}
             {lastTest.blank && <p>✗ the screen stayed empty</p>}
@@ -144,12 +163,13 @@ function GladiatorCard({ g, mode, score, winner }: { g: GladiatorView; mode: "li
           {g.tests.map((t) => (
             <span
               key={t.round}
-              title={t.passed ? "No errors, and something on screen" : [...t.errors, ...(t.blank ? ["the screen stayed empty"] : [])].join("\n")}
+              title={testSummary(t)}
               className={t.passed ? "text-emerald-400" : "text-red-400"}
             >
               {t.passed ? "✓" : "✗"} test {t.round}
               {!t.passed && t.errors.length > 0 && ` · ${t.errors.length} error${t.errors.length > 1 ? "s" : ""}`}
               {!t.passed && t.blank && " · blank"}
+              {t.ai && (t.ai.bugs.length ? ` · AI: ${t.ai.bugs.length} bug${t.ai.bugs.length > 1 ? "s" : ""}` : " · AI ✓")}
             </span>
           ))}
           <span className="flex-1" />
@@ -199,5 +219,46 @@ function GladiatorCard({ g, mode, score, winner }: { g: GladiatorView; mode: "li
       </footer>
       {g.error && <p className="px-4 pb-3 font-mono text-xs text-red-400">{g.error}</p>}
     </article>
+  );
+}
+
+// Hover text for a test result: everything the testers found, or what they checked.
+function testSummary(t: GladiatorView["tests"][number]) {
+  const lines = [
+    ...t.errors,
+    ...(t.blank ? ["the screen stayed empty"] : []),
+    ...(t.ai?.bugs ?? []).map((b) => `AI tester: ${b}`),
+  ];
+  if (lines.length) return lines.join("\n");
+  if (t.slowBrowser) return "No errors (the test browser ran too slowly to check it properly)";
+  if (!t.ai) return "No errors";
+  return `No errors, and the AI tester${t.ai.kind ? ` (testing it as a ${t.ai.kind})` : ""} says: ${t.ai.summary || "it worked"}`;
+}
+
+// Entries are written for a full browser window, so show them at a laptop-sized
+// 960 x 600 (the same size the tests use) and shrink the whole page to fit the card.
+// Nothing gets cut off, and you see exactly what the testers and the judge saw.
+const GAME = { width: 960, height: 600 };
+function GameFrame(props: { title: string; src?: string; srcDoc?: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(0.5);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const watch = new ResizeObserver(([entry]) => setScale(entry.contentRect.width / GAME.width));
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, []);
+  return (
+    <div ref={box} className="absolute inset-0 overflow-hidden bg-white">
+      <iframe
+        title={props.title}
+        sandbox="allow-scripts"
+        src={props.src}
+        srcDoc={props.src ? undefined : props.srcDoc}
+        className="border-0 bg-white"
+        style={{ width: GAME.width, height: GAME.height, transform: `scale(${scale})`, transformOrigin: "0 0" }}
+      />
+    </div>
   );
 }

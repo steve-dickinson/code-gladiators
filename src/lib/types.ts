@@ -18,6 +18,12 @@ export type TestReport = {
   blank: boolean; // nothing drawn and no text
   responsive: boolean; // the page changed after clicks, keys and mouse movement
   ms: number;
+  screenshot?: string; // the page after being played, as a JPEG data URL: what the judge sees
+  // What the AI tester did and found (absent if it didn't get to test).
+  // kind is what it decided the entry is: a game, a tool, a toy, a visual…
+  ai?: { moves: string[]; bugs: string[]; summary: string; costUsd: number; kind?: string };
+  // The test browser drew too few frames a second to judge the controls fairly.
+  slowBrowser?: boolean;
 };
 
 // Every event the battle streams. The same events are recorded to Blob,
@@ -41,7 +47,7 @@ export type BattleData = {
     ms?: number;
   };
   test: { gladiator: string } & TestReport;
-  verdict: { winner: string; headline: string; scores: Score[] };
+  verdict: { winner: string; headline: string; scores: Score[]; sawScreenshots?: boolean };
   replay: { id: string };
   done: { ok: boolean };
 };
